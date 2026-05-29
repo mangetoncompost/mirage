@@ -309,7 +309,13 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
     // Get config values
     let config = CONFIG.get().expect("Config not initialized");
     let port = config.port;
-    let numwant = config.numwant.unwrap_or(80) as i32;
+    // numwant = 0 on STOPPED (like a real Transmission), else config override or
+    // the client profile's num_want.
+    let numwant: i32 = if event == Some(Event::Stopped) {
+        client.num_want_on_stop as i32
+    } else {
+        config.numwant.unwrap_or(client.num_want) as i32
+    };
 
     let request = TrackerRequest {
         info_hash: torrent.info_hash,

@@ -17,6 +17,7 @@ mod config;
 mod directory;
 pub mod json_output;
 pub mod torrent;
+mod transmission;
 mod ui;
 mod utils;
 mod watcher;
