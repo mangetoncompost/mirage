@@ -3,3 +3,6 @@ target/
 /torrents/*.torrent
 .env.local
 .claude/
+.DS_Store
+# generated macOS app bundle (rebuild with scripts/make_app.sh; contains the binary)
+/RatioUp.app/
