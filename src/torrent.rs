@@ -82,6 +82,18 @@ impl From<BencodeDecoderError> for TorrentError {
 //     pub port: i64,
 // }
 
+/// Per-torrent simulated download phase. A real BitTorrent client leeches a
+/// file (left>0, downloaded growing) before it can seed it; declaring upload on
+/// a file you never downloaded is the classic ratio-cheat tell. We model that
+/// progression. `Eq`-safe (no f64) so `Torrent`'s derive still compiles.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum DownloadState {
+    /// Still leeching: `downloaded` bytes acquired so far (0 <= downloaded < length).
+    Downloading { downloaded: u64 },
+    /// Download finished; now seeding (declares upload).
+    Seeding,
+}
+
 /// To only keep minimal torrent info in RAM. Info are ised in:
 /// - the announcer (info hash, urls, name in log, sizes, downloaded, uploaded, interval, last_announce, seeders, leechers)
 /// - web UI (info hash, name, size, downloaded, uploaded, seeders, leechers, is private, is a folder, path)
@@ -130,6 +142,22 @@ pub struct Torrent {
     /// is `origin.elapsed().as_secs_f64()`; the announce integral window is
     /// `[t1 - last_announce.elapsed(), t1]` with `t1 = origin.elapsed()`.
     pub origin: std::time::Instant,
+
+    /// Current download phase + accumulated downloaded bytes. Source of truth for
+    /// declared_downloaded()/declared_left()/is_seeding().
+    pub dl_state: DownloadState,
+    /// Fixed simulated download rate (bytes/s), drawn ONCE at construction from
+    /// [min_download_rate, max_download_rate]. NOT persisted (re-drawn on load);
+    /// progress is the persisted accumulator, not rate*elapsed. Guaranteed >= 1.
+    pub dl_rate: u64,
+    /// Wall-clock anchor for the download accumulator. advance_download() credits
+    /// only the real seconds since this instant, then resets it. Reset on
+    /// persistence-load so downtime is NOT credited as progress.
+    pub dl_last_tick: std::time::Instant,
+    /// Transient (NOT persisted; init false). Set true only after a `completed`
+    /// announce gets a successful tracker response. Lets us RETRY `completed` on a
+    /// failed announce while never double-sending it after success.
+    pub completed_sent: bool,
 }
 
 /// Oscillation periods (seconds) and their amplitude weights for the fake
@@ -171,9 +199,76 @@ impl Torrent {
         self.last_announce.elapsed().as_secs() >= self.interval
     }
 
-    /// Tells if we can upload (need leechers)
+    /// Tells if we can declare upload: only once we are SEEDING (finished the
+    /// simulated download — you cannot upload a file you never downloaded) AND
+    /// the swarm has leechers to serve. This single gate cascades: speed_at and
+    /// integrate early-return 0 when !can_upload(), so a Downloading torrent
+    /// declares uploaded=0 everywhere automatically.
     pub fn can_upload(&self) -> bool {
-        (self.seeders > 0 && self.leechers > 0) || self.leechers > 1
+        self.is_seeding() && ((self.seeders > 0 && self.leechers > 0) || self.leechers > 1)
+    }
+
+    /// Draw the per-torrent simulated download rate (bytes/s, >= 1) from config.
+    /// Falls back to a sane band if CONFIG isn't set (some unit tests).
+    fn pick_dl_rate() -> u64 {
+        let (lo, hi) = crate::CONFIG
+            .get()
+            .map(|c| (c.min_download_rate as u64, c.max_download_rate as u64))
+            .unwrap_or((8_192, 16_777_216));
+        let lo = lo.max(1);
+        let hi = hi.max(lo);
+        fastrand::u64(lo..=hi)
+    }
+
+    /// Initial phase for a freshly parsed torrent (no persistence applied yet):
+    /// a 0-length torrent is instantly Seeding, otherwise Downloading from 0.
+    fn initial_dl_state(length: u64) -> DownloadState {
+        if length == 0 {
+            DownloadState::Seeding
+        } else {
+            DownloadState::Downloading { downloaded: 0 }
+        }
+    }
+
+    /// Advance the simulated download by the real time elapsed since
+    /// `dl_last_tick`, at the fixed `dl_rate`. Monotone, saturating, clamped to
+    /// `length`. Returns true EXACTLY on the Downloading->Seeding transition (the
+    /// call that crosses length) so the caller fires event=completed once.
+    /// Idempotent once Seeding (returns false). This is the ONLY place
+    /// `downloaded` is mutated.
+    pub fn advance_download(&mut self) -> bool {
+        if let DownloadState::Downloading { downloaded } = self.dl_state {
+            let secs = self.dl_last_tick.elapsed().as_secs_f64();
+            self.dl_last_tick = std::time::Instant::now();
+            let gained = (secs * self.dl_rate as f64) as u64; // dl_rate >= 1
+            let new = downloaded.saturating_add(gained).min(self.length);
+            if new >= self.length {
+                self.dl_state = DownloadState::Seeding;
+                return true; // crossed the finish line on THIS call only
+            }
+            self.dl_state = DownloadState::Downloading { downloaded: new };
+        }
+        false
+    }
+
+    /// Bytes to declare as downloaded (== length once Seeding).
+    #[inline]
+    pub fn declared_downloaded(&self) -> u64 {
+        match self.dl_state {
+            DownloadState::Downloading { downloaded } => downloaded,
+            DownloadState::Seeding => self.length,
+        }
+    }
+
+    /// Bytes to declare as left. Never underflows (advance clamps to length).
+    #[inline]
+    pub fn declared_left(&self) -> u64 {
+        self.length - self.declared_downloaded()
+    }
+
+    #[inline]
+    pub fn is_seeding(&self) -> bool {
+        matches!(self.dl_state, DownloadState::Seeding)
     }
 
     pub fn uploaded(&mut self, min_speed: u32, available_speed: u32) -> u32 {
@@ -313,7 +408,17 @@ impl Torrent {
         result.push_str(&self.leechers.to_string());
         result.push_str(", \"next_upload_speed\": ");
         result.push_str(&self.next_upload_speed.to_string());
-        result.push_str(", \"urls\": [");
+        result.push_str(", \"downloaded\": ");
+        result.push_str(&self.declared_downloaded().to_string());
+        result.push_str(", \"left\": ");
+        result.push_str(&self.declared_left().to_string());
+        result.push_str(", \"state\": \"");
+        result.push_str(if self.is_seeding() {
+            "seeding"
+        } else {
+            "downloading"
+        });
+        result.push_str("\", \"urls\": [");
         let count = self.urls.len();
         for (index, url) in self.urls.iter().enumerate() {
             result.push_str(&format!("\"{url}\""));
@@ -502,6 +607,10 @@ impl Torrent {
             // decouples each torrent's speed curve from the others.
             speed_seed: fastrand::u64(..),
             origin: Instant::now(),
+            dl_state: Self::initial_dl_state(total_length),
+            dl_rate: Self::pick_dl_rate(),
+            dl_last_tick: Instant::now(),
+            completed_sent: false,
         })
     }
 }
@@ -510,6 +619,82 @@ impl Torrent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Minimal Downloading torrent for download-phase tests (CONFIG-independent).
+    fn dl_torrent(length: u64, rate: u64) -> Torrent {
+        Torrent {
+            name: "dl".into(),
+            urls: vec![],
+            length,
+            private: false,
+            uploaded: 0,
+            last_announce: std::time::Instant::now(),
+            info_hash: [0; 20],
+            info_hash_urlencoded: String::new(),
+            seeders: 4,
+            leechers: 16,
+            next_upload_speed: 0,
+            interval: 1800,
+            error_count: 0,
+            encoding: None,
+            min_interval: None,
+            tracker_id: None,
+            source_path: None,
+            speed_seed: 0,
+            origin: std::time::Instant::now(),
+            dl_state: Torrent::initial_dl_state(length),
+            dl_rate: rate.max(1),
+            dl_last_tick: std::time::Instant::now(),
+            completed_sent: false,
+        }
+    }
+
+    #[test]
+    fn advance_download_monotone_clamps_and_completes_once() {
+        let mut t = dl_torrent(1000, 400);
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let done = t.advance_download(); // ~440 bytes, not done
+        assert!(!done);
+        assert!(matches!(t.dl_state, DownloadState::Downloading { downloaded } if downloaded > 0 && downloaded < 1000));
+        // Force completion: a long elapsed crosses length.
+        t.dl_rate = 1_000_000;
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(t.advance_download()); // crosses -> Seeding, returns true ONCE
+        assert!(t.is_seeding());
+        assert_eq!(t.declared_downloaded(), 1000);
+        assert_eq!(t.declared_left(), 0);
+        assert!(!t.advance_download()); // idempotent once Seeding
+    }
+
+    #[test]
+    fn zero_length_starts_seeding() {
+        let mut t = dl_torrent(0, 1000);
+        assert!(t.is_seeding());
+        assert!(!t.advance_download());
+        assert_eq!(t.declared_left(), 0);
+        assert_eq!(t.declared_downloaded(), 0);
+    }
+
+    #[test]
+    fn declared_left_never_underflows() {
+        for d in [0u64, 500, 1000] {
+            let mut t = dl_torrent(1000, 1);
+            t.dl_state = if d >= 1000 {
+                DownloadState::Seeding
+            } else {
+                DownloadState::Downloading { downloaded: d }
+            };
+            assert_eq!(t.declared_downloaded() + t.declared_left(), 1000);
+        }
+    }
+
+    #[test]
+    fn can_upload_requires_seeding() {
+        let mut t = dl_torrent(1000, 1); // Downloading, 16 leechers
+        assert!(!t.can_upload(), "must not upload while downloading");
+        t.dl_state = DownloadState::Seeding;
+        assert!(t.can_upload(), "can upload once seeding with leechers");
+    }
 
     #[test]
     fn test_speed_curve_integral_matches_trapezoid_and_bounds() {
@@ -542,6 +727,10 @@ mod tests {
             source_path: None,
             speed_seed: 0xDEAD_BEEF_CAFE_F00D,
             origin: std::time::Instant::now(),
+            dl_state: DownloadState::Seeding,
+            dl_rate: 1_048_576,
+            dl_last_tick: std::time::Instant::now(),
+            completed_sent: false,
         };
         assert!(t.can_upload());
 
@@ -601,6 +790,10 @@ mod tests {
             source_path: None,
             speed_seed: 0,
             origin: std::time::Instant::now(),
+            dl_state: DownloadState::Seeding,
+            dl_rate: 1_048_576,
+            dl_last_tick: std::time::Instant::now(),
+            completed_sent: false,
         };
         assert!(!t.can_upload());
         t.leechers = 5;
@@ -635,6 +828,10 @@ mod tests {
             source_path: None,
             speed_seed: 0,
             origin: std::time::Instant::now(),
+            dl_state: DownloadState::Seeding,
+            dl_rate: 1_048_576,
+            dl_last_tick: std::time::Instant::now(),
+            completed_sent: false,
         };
         let speed = t.uploaded(16, 64);
         assert!(speed > 0);

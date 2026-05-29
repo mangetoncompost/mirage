@@ -21,6 +21,9 @@ pub struct Config {
     pub port: u16,
     pub min_upload_rate: u32, //in byte
     pub max_upload_rate: u32, //in byte
+    /// Simulated download speed band (bytes/s), used by the fake download phase.
+    pub min_download_rate: u32,
+    pub max_download_rate: u32,
 
     pub use_pid_file: bool,
 
@@ -45,6 +48,8 @@ impl Default for Config {
             port: fastrand::u16(49152..65534),
             min_upload_rate: 8192,    //8*1024
             max_upload_rate: 2097152, //2048*1024
+            min_download_rate: 8192,       // == .env MIN_DOWNLOAD_RATE hint
+            max_download_rate: 16_777_216, // == .env MAX_DOWNLOAD_RATE hint (16 MiB/s)
             // check_https_certs: false,
             use_pid_file: false,
             numwant: None,
@@ -143,6 +148,22 @@ impl Config {
                         return config;
                     }
                 }
+                if let Some(speed) = root_table.get("min_download_rate") {
+                    if let Some(value) = speed.as_integer() {
+                        config.min_download_rate = value as u32;
+                    } else {
+                        error!("Invalid min download rate");
+                        return config;
+                    }
+                }
+                if let Some(speed) = root_table.get("max_download_rate") {
+                    if let Some(value) = speed.as_integer() {
+                        config.max_download_rate = value as u32;
+                    } else {
+                        error!("Invalid max download rate");
+                        return config;
+                    }
+                }
 
                 if let Some(dir) = root_table.get("torrent_dir") {
                     if let Some(dir) = dir.as_str() {
@@ -172,6 +193,13 @@ impl Config {
                 config.min_upload_rate, config.max_upload_rate
             );
             std::mem::swap(&mut config.min_upload_rate, &mut config.max_upload_rate);
+        }
+        if config.min_download_rate > config.max_download_rate {
+            warn!(
+                "Min download rate ({}) is greater than max download rate ({}), switching values",
+                config.min_download_rate, config.max_download_rate
+            );
+            std::mem::swap(&mut config.min_download_rate, &mut config.max_download_rate);
         }
 
         config

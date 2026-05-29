@@ -16,6 +16,7 @@ pub mod bencode;
 mod config;
 mod directory;
 pub mod json_output;
+mod state;
 pub mod torrent;
 mod transmission;
 mod ui;
@@ -190,6 +191,8 @@ async fn main() {
         ui::draw::restore();
         info!("Exiting...");
         announcer::tracker::announce_stopped().await;
+        // Persist final download phase so the next launch resumes correctly.
+        let _ = state::save().await;
         if config.use_pid_file && pid_file.is_some() {
             remove_pid_file(pid_file).await;
         }

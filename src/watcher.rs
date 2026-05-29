@@ -108,13 +108,16 @@ async fn handle_file_added(path: PathBuf) {
     info!("New torrent file detected: {}", path.display());
 
     // Parse the torrent file
-    let torrent = match Torrent::from_file(path.clone()) {
+    let mut torrent = match Torrent::from_file(path.clone()) {
         Ok(t) => t,
         Err(e) => {
             error!("Cannot parse torrent {}: {e}", path.display());
             return;
         }
     };
+    // Resume persisted download phase (a torrent re-added after removal should
+    // continue where it left off, not re-download).
+    crate::state::apply(&mut torrent, &crate::state::load_dict());
 
     // Check if torrent has URLs
     if torrent.urls.is_empty() {

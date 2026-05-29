@@ -23,13 +23,16 @@ pub async fn load_torrents(directory: PathBuf) -> u16 {
     let mut count = 0u16;
     let list = &mut *TORRENTS.write().await;
     let mut added_hashes: Vec<String> = Vec::new();
+    // Persisted download phase (parsed once), applied per torrent below so a
+    // restart resumes instead of re-downloading from scratch.
+    let state = crate::state::load_dict();
     for p in paths {
         let path = p.expect("Cannot get torrent path").path();
         if let Some(extension) = path.clone().extension()
             && extension.eq_ignore_ascii_case("torrent")
         {
             match Torrent::from_file(path.clone()) {
-                Ok(torrent) => {
+                Ok(mut torrent) => {
                     info!("Found torrent {}", path.display());
                     // info!("Found torrent {} {:?}", path.display(), torrent);
                     // TODO: dedup, ignore UDP
@@ -42,6 +45,7 @@ pub async fn load_torrents(directory: PathBuf) -> u16 {
                     if added_hashes.contains(&torrent.info_hash_urlencoded) {
                         warn!("A torrent with the same hash is already added");
                     } else {
+                        crate::state::apply(&mut torrent, &state);
                         added_hashes.push(torrent.info_hash_urlencoded.clone());
                         list.push(Mutex::new(torrent));
                         count += 1;
