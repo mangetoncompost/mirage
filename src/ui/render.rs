@@ -496,24 +496,36 @@ fn render_torrent_row(tv: &crate::ui::snapshot::TorrentView, c: &Caps, inner: us
     let name = truncate(&tv.name, name_w, c.utf8);
     let dot = if tv.error_count > 0 {
         format!("{}●{}", c_err(c), c.reset())
+    } else if tv.downloading {
+        // Downloading => active (yellow), not idle.
+        format!("{}●{}", c_warn(c), c.reset())
     } else if tv.up_speed > 0 {
         format!("{}●{}", c_ok(c), c.reset())
     } else {
         format!("{}●{}", c_dim(c), c.reset())
     };
     let dot_ascii = "* "; // visible width budget for the dot+space when colored we still use 1 cell glyph
-    let speed = if tv.up_speed > 0 {
+    // While downloading, show "DL NN%" instead of an upload speed (upload is 0).
+    let speed = if tv.downloading {
+        format!("DL {}%", tv.dl_percent)
+    } else if tv.up_speed > 0 {
         format!("{}/s", format_bytes(tv.up_speed))
     } else {
         "idle".to_string()
     };
     let nxt = fmt_mmss(tv.secs_to_announce);
-    let bar = progress_bar(
-        tv.interval.saturating_sub(tv.secs_to_announce),
-        tv.interval,
-        bar_w,
-        c,
-    );
+    // While downloading, the bar shows download progress; while seeding, it shows
+    // the countdown to the next announce.
+    let bar = if tv.downloading {
+        progress_bar(tv.dl_percent as u64, 100, bar_w, c)
+    } else {
+        progress_bar(
+            tv.interval.saturating_sub(tv.secs_to_announce),
+            tv.interval,
+            bar_w,
+            c,
+        )
+    };
 
     // Visible-width name column already includes the colored dot (1 cell) + space.
     let name_field = format!("{dot} {name}");

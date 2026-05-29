@@ -155,6 +155,7 @@ impl UdpTracker {
         announce_packet.extend_from_slice(&request.uploaded.to_be_bytes());
         // Event: 0=none, 1=completed, 2=started, 3=stopped (BEP 0015)
         let event_value: u32 = match request.event {
+            Some(Event::Completed) => 1,
             Some(Event::Started) => 2,
             Some(Event::Stopped) => 3,
             None => 0,
@@ -286,9 +287,10 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
     };
 
     // Declared upload = exact integral of the time-varying speed curve over the
-    // window since the last announce (same model as the HTTP path). STARTED
-    // declares 0. Window derived from last_announce → idempotent per announce.
-    let uploaded: u64 = if event == Some(Event::Started) {
+    // window since the last announce (same model as the HTTP path). STARTED and
+    // COMPLETED declare 0 (just started / just finished downloading, not seeding
+    // yet). Window derived from last_announce → idempotent per announce.
+    let uploaded: u64 = if matches!(event, Some(Event::Started) | Some(Event::Completed)) {
         0
     } else {
         let t1 = torrent.origin.elapsed().as_secs_f64();
@@ -320,8 +322,8 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
     let request = TrackerRequest {
         info_hash: torrent.info_hash,
         peer_id: peer_id_array,
-        downloaded: 0,
-        left: 0,
+        downloaded: torrent.declared_downloaded(),
+        left: torrent.declared_left(),
         uploaded,
         event,
         key: client.key,
@@ -340,6 +342,10 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
             torrent.leechers = response.leechers.min(u16::MAX as u32) as u16;
             torrent.last_announce = std::time::Instant::now();
             torrent.error_count = 0;
+            // Exactly-once-successful `completed` (retried on failure).
+            if event == Some(Event::Completed) {
+                torrent.completed_sent = true;
+            }
 
             info!(
                 "UDP announce OK: interval={}, seeders={}, leechers={}, peers={}",
@@ -464,6 +470,7 @@ mod tests {
         packet.extend_from_slice(&request.left.to_be_bytes()); // 8 bytes
         packet.extend_from_slice(&request.uploaded.to_be_bytes()); // 8 bytes
         let event_value: u32 = match request.event {
+            Some(Event::Completed) => 1,
             Some(Event::Started) => 2,
             Some(Event::Stopped) => 3,
             None => 0,

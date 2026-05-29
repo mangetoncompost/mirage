@@ -32,11 +32,11 @@ use url::{Host, Url};
 pub enum Event {
     /// The first request to tracker must include this value.
     Started = 2,
-    // /// Must be sent to the tracker when the client becomes a seeder. Must not be
-    // /// present if the client started as a seeder.
-    // Completed,
+    /// Must be sent when the client becomes a seeder (finished downloading).
+    /// Must NOT be present if the client started as a seeder.
+    Completed = 1,
     /// Must be sent to tracker if the client is shutting down gracefully.
-    Stopped,
+    Stopped = 3,
 }
 
 /// Extract a peer count from a `complete`/`incomplete` value that may be either
@@ -274,9 +274,11 @@ pub async fn announce(torrent: &mut Torrent, event: Option<Event>) {
         torrent.seeders = max_seeders;
         torrent.leechers = max_leechers;
         info!(
-            "Anounced: interval={}, event={:?}, downloaded=0, uploaded={}, seeders={}, leechers={}, torrent={}",
+            "Anounced: interval={}, event={:?}, downloaded={}, left={}, uploaded={}, seeders={}, leechers={}, torrent={}",
             torrent.interval,
             event,
+            torrent.declared_downloaded(),
+            torrent.declared_left(),
             torrent.uploaded,
             torrent.seeders,
             torrent.leechers,
@@ -492,6 +494,11 @@ async fn announce_http(
                                 // Reset last_announce and error_count on successful response
                                 torrent.last_announce = std::time::Instant::now();
                                 torrent.error_count = 0;
+                                // A `completed` is delivered exactly once SUCCESSFULLY:
+                                // mark it only on success so a failed completed is retried.
+                                if event == Some(Event::Completed) {
+                                    torrent.completed_sent = true;
+                                }
                                 if uploaded > 0 {
                                     emit(
                                         EventKind::UploadTick,
@@ -553,7 +560,10 @@ pub async fn build_url(
     // been showing). STARTED declares 0, like a real client. The window is
     // derived from last_announce, so it is idempotent across the per-URL loop
     // (re-integrates the same [t0,t1] until last_announce resets on success).
-    let uploaded: u64 = if event == Some(Event::Started) {
+    // STARTED and COMPLETED declare 0 upload (a client that just started or just
+    // finished downloading hasn't seeded yet). Belt-and-suspenders with the
+    // can_upload() gate (which is false while Downloading anyway).
+    let uploaded: u64 = if matches!(event, Some(Event::Started) | Some(Event::Completed)) {
         0
     } else {
         let t1 = torrent.origin.elapsed().as_secs_f64();
@@ -589,7 +599,7 @@ pub async fn build_url(
             "{event}",
             match e {
                 Event::Started => "started",
-                // Event::Completed => "completed",
+                Event::Completed => "completed",
                 Event::Stopped => "stopped",
             },
         ),
@@ -599,16 +609,18 @@ pub async fn build_url(
             .replace("event={event}", ""),
     };
 
+    // Declare the simulated download progress: downloaded grows, left shrinks
+    // until the download phase finishes (then downloaded==length, left==0).
     let result = result
         .replace("{infohash}", &torrent.info_hash_urlencoded)
         .replace("{key}", &key)
         .replace("{uploaded}", uploaded.to_string().as_str())
-        .replace("{downloaded}", "0")
+        .replace("{downloaded}", &torrent.declared_downloaded().to_string())
         .replace("{peerid}", &client.peer_id)
         .replace("{port}", &port.to_string())
         .replace("{numwant}", &numwant.to_string())
         .replace("ipv6={ipv6}", "")
-        .replace("{left}", "0");
+        .replace("{left}", &torrent.declared_left().to_string());
     // info!(
     //     "\tUploaded: {}",
     //     byte_unit::Byte::from_u128(uploaded as u128)
@@ -689,6 +701,7 @@ mod tests {
                 "{event}",
                 match e {
                     Event::Started => "started",
+                    Event::Completed => "completed",
                     Event::Stopped => "stopped",
                 },
             ),

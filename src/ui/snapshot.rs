@@ -30,6 +30,10 @@ pub struct TorrentView {
     pub secs_to_announce: u64, // interval - elapsed, saturating
     pub error_count: u16,
     pub busy: bool, // true => mid-announce, try_lock failed (placeholder row)
+    pub downloading: bool, // true => still in the simulated download phase
+    pub dl_percent: u8,    // 0..=100 download progress
+    #[allow(dead_code)]
+    pub downloaded: u64, // declared downloaded bytes (display interpolation)
 }
 
 #[derive(Clone)]
@@ -59,18 +63,36 @@ pub async fn snapshot_torrents() -> Vec<TorrentView> {
             // NEVER .await here
             Ok(t) => {
                 let elapsed = t.last_announce.elapsed().as_secs();
+                // Display-only projection of download progress between sparse
+                // ticks (does NOT mutate dl_state — advance happens only in the
+                // scheduler). u128 percent math is safe for huge u64 lengths.
+                let projected = if t.is_seeding() {
+                    t.length
+                } else {
+                    let gained = (t.dl_last_tick.elapsed().as_secs_f64() * t.dl_rate as f64) as u64;
+                    t.declared_downloaded().saturating_add(gained).min(t.length)
+                };
+                let dl_percent = if t.length == 0 {
+                    100u8
+                } else {
+                    (projected as u128 * 100 / t.length as u128) as u8
+                };
                 rows.push(TorrentView {
                     name: t.name.clone(),
                     seeders: t.seeders,
                     leechers: t.leechers,
                     // Instantaneous speed off the same curve that backs the
-                    // declared integral — 4 sins, synchronous, no .await.
+                    // declared integral — 4 sins, synchronous, no .await. It is 0
+                    // while downloading (can_upload() is false), which is correct.
                     up_speed: t.speed_at(t.origin.elapsed().as_secs_f64()).round() as u32,
                     uploaded: t.uploaded,
                     interval: t.interval,
                     secs_to_announce: t.interval.saturating_sub(elapsed),
                     error_count: t.error_count,
                     busy: false,
+                    downloading: !t.is_seeding(),
+                    dl_percent,
+                    downloaded: projected,
                 });
             }
             Err(_) => rows.push(TorrentView {
@@ -83,6 +105,9 @@ pub async fn snapshot_torrents() -> Vec<TorrentView> {
                 secs_to_announce: 0,
                 error_count: 0,
                 busy: true,
+                downloading: false,
+                dl_percent: 0,
+                downloaded: 0,
             }),
         }
     } // outer read lock dropped here

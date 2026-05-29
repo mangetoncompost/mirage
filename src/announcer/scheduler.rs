@@ -1,7 +1,25 @@
 use tracing::{debug, info, trace};
 
 use crate::TORRENTS;
+use crate::torrent::Torrent;
 use tokio::time::Duration;
+
+use super::tracker::Event;
+
+/// Re-announce cadence while a torrent is in its simulated download phase, so
+/// `downloaded` grows smoothly and progress is reported between the tracker's
+/// sparse (~30 min) intervals instead of jumping at announce points.
+const DL_TICK_SECS: u64 = 45;
+
+/// Next download-phase tick for a torrent: min(DL_TICK, ETA to finish) so the
+/// `completed` event fires NEAR the true crossing rather than up to a tick late.
+fn dl_interval(t: &Torrent) -> u64 {
+    let left = t.declared_left();
+    let rate = t.dl_rate.max(1);
+    let eta = left / rate; // seconds to finish at the fixed rate
+    let base = DL_TICK_SECS.min(eta.max(1));
+    add_jitter(base)
+}
 
 /// Add jitter (±5%) to an interval to prevent thundering herd effect.
 /// Multiple torrents with similar intervals will announce at slightly different times.
@@ -27,29 +45,53 @@ pub async fn run(wait_time: u64) {
             for m in list.iter() {
                 let mut t = m.lock().await;
                 let elapsed = t.last_announce.elapsed().as_secs();
-                let time_until_announce = t.interval.saturating_sub(elapsed);
                 trace!(
                     torrent = %t.name,
                     elapsed = elapsed,
                     interval = t.interval,
-                    time_until_announce = time_until_announce,
-                    should_announce = t.should_announce(),
+                    seeding = t.is_seeding(),
+                    downloaded = t.declared_downloaded(),
                     uploaded = t.uploaded,
                     seeders = t.seeders,
                     leechers = t.leechers,
                     "scheduler tick"
                 );
-                if t.should_announce() {
-                    debug!(torrent = %t.name, "⏰ time to announce");
-                    super::tracker::announce(&mut t, None).await;
-                    // The announce resets interval to the tracker's value. If
-                    // the torrent still has 0 leechers, shorten it again so we
-                    // re-check in minutes instead of waiting the full interval.
-                    // (Does nothing if it can now upload — normal cadence then.)
+
+                if !t.is_seeding() {
+                    // DOWNLOADING: tick on the short cadence, advance progress, and
+                    // re-announce with the partial downloaded/left (or `completed`
+                    // on the call that finishes the download).
+                    if elapsed >= dl_interval(&t) {
+                        let completed_now = t.advance_download();
+                        // `completed` fires on the finishing call, or is retried
+                        // (is_seeding && !completed_sent) if a prior one failed.
+                        let ev = if completed_now || (t.is_seeding() && !t.completed_sent) {
+                            Some(Event::Completed)
+                        } else {
+                            None
+                        };
+                        debug!(torrent = %t.name, ?ev, "⤓ download tick");
+                        super::tracker::announce(&mut t, ev).await;
+                    }
+                    let nxt = dl_interval(&t).saturating_sub(t.last_announce.elapsed().as_secs());
+                    min_interval = u64::min(min_interval, nxt.max(1));
+                } else if !t.completed_sent {
+                    // SEEDING but a `completed` still needs to land (it failed
+                    // earlier): retry it now, then resume normal cadence.
+                    debug!(torrent = %t.name, "↻ retrying completed");
+                    super::tracker::announce(&mut t, Some(Event::Completed)).await;
                     super::tracker::apply_recheck(&mut t);
+                    min_interval = u64::min(min_interval, t.interval.max(1));
+                } else {
+                    // SEEDING, completed delivered: the original behaviour.
+                    if t.should_announce() {
+                        debug!(torrent = %t.name, "⏰ time to announce");
+                        super::tracker::announce(&mut t, None).await;
+                        super::tracker::apply_recheck(&mut t);
+                    }
+                    let e = t.last_announce.elapsed().as_secs();
+                    min_interval = u64::min(min_interval, t.interval.saturating_sub(e));
                 }
-                // Always update min_interval based on time until next announce
-                min_interval = u64::min(min_interval, time_until_announce);
             }
             // Ensure we don't sleep forever if no torrents or all have 0 interval
             if min_interval == u64::MAX || min_interval == 0 {
@@ -60,6 +102,8 @@ pub async fn run(wait_time: u64) {
         };
         debug!("Next announce in {}s", next_interval);
         crate::json_output::write().await;
+        // Persist download phase each tick so a crash/restart resumes correctly.
+        let _ = crate::state::save().await;
         tokio::time::sleep(Duration::from_secs(next_interval)).await;
     }
 }
