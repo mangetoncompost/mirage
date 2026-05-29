@@ -465,13 +465,18 @@ pub async fn build_url(
     key: String,
 ) -> (String, u64) {
     info!("Torrent {:?}: {}", event, torrent.name);
-    //compute downloads and uploads
-    let elapsed: u64 = if event == Some(Event::Started) {
+    // Declared upload = exact integral of the time-varying speed curve over the
+    // window since the last announce (the area under the curve the dashboard has
+    // been showing). STARTED declares 0, like a real client. The window is
+    // derived from last_announce, so it is idempotent across the per-URL loop
+    // (re-integrates the same [t0,t1] until last_announce resets on success).
+    let uploaded: u64 = if event == Some(Event::Started) {
         0
     } else {
-        torrent.last_announce.elapsed().as_secs()
+        let t1 = torrent.origin.elapsed().as_secs_f64();
+        let t0 = (t1 - torrent.last_announce.elapsed().as_secs_f64()).max(0.0);
+        torrent.integrate(t0, t1).round().max(0.0) as u64
     };
-    let uploaded: u64 = torrent.next_upload_speed as u64 * elapsed;
 
     //build URL list
     let client = (*CLIENT.read().await).clone().unwrap();

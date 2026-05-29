@@ -90,6 +90,48 @@ pub struct Torrent {
 
     /// Source file path (used for file watcher to identify torrents on removal)
     pub source_path: Option<PathBuf>,
+
+    /// Per-torrent seed selecting the phases (and small period jitter) of the
+    /// sum-of-sines upload-speed curve, so torrents fluctuate independently.
+    pub speed_seed: u64,
+    /// Fixed monotonic time origin for the speed curve. Captured ONCE at
+    /// construction and NEVER reset (unlike `last_announce`). The curve argument
+    /// is `origin.elapsed().as_secs_f64()`; the announce integral window is
+    /// `[t1 - last_announce.elapsed(), t1]` with `t1 = origin.elapsed()`.
+    pub origin: std::time::Instant,
+}
+
+/// Oscillation periods (seconds) and their amplitude weights for the fake
+/// upload-speed curve. INVARIANT: SPEED_WEIGHTS must sum to <= 1.0, otherwise
+/// the curve can exceed [min,max] and the `.clamp()` in `speed_at` silently
+/// breaks the "declared integral == area under the displayed curve" identity
+/// (the bounds proof depends on the weights summing to <= 1). Components: a slow
+/// mean-drift (1200s) plus three texture oscillations (90s, 23s, 7s).
+const SPEED_PERIODS: [f64; 4] = [1200.0, 90.0, 23.0, 7.0];
+const SPEED_WEIGHTS: [f64; 4] = [0.45, 0.25, 0.18, 0.12]; // sum == 1.0
+
+/// Deterministic per-(torrent, component) phase in [0, TAU).
+#[inline]
+fn speed_phase(seed: u64, i: usize) -> f64 {
+    let h = seed
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add((i as u64).wrapping_mul(0xD1B5_4A32_D192_ED03));
+    // top 53 bits -> uniform f64 in [0,1) -> scale to [0, TAU)
+    (h >> 11) as f64 / ((1u64 << 53) as f64) * std::f64::consts::TAU
+}
+
+/// Per-(torrent, component) effective angular frequency. The period is jittered
+/// by up to +/-6% per seed/component so no two torrents share a clean harmonic
+/// spectrum (defeats trivial FFT fingerprinting). Each component stays a single
+/// sine, so the closed-form integral is unaffected.
+#[inline]
+fn speed_omega(seed: u64, i: usize) -> f64 {
+    let h = seed
+        .wrapping_mul(0xC2B2_AE3D_27D4_EB4F)
+        .wrapping_add((i as u64).wrapping_mul(0x1656_67B1_9E37_79F9));
+    let frac = (h >> 11) as f64 / ((1u64 << 53) as f64); // [0,1)
+    let jitter = 1.0 + (frac - 0.5) * 0.12; // [0.94, 1.06)
+    std::f64::consts::TAU / (SPEED_PERIODS[i] * jitter)
 }
 
 impl Torrent {
@@ -113,8 +155,13 @@ impl Torrent {
     }
 
     pub fn compute_speeds(&mut self) {
+        // The frozen random pick is gone: next_upload_speed is now just the
+        // current instantaneous value of the curve, kept for legacy JSON/log
+        // output (the declared bytes come from `integrate`, not this field).
+        let t = self.origin.elapsed().as_secs_f64();
+        let speed = self.speed_at(t).round() as u32;
+        self.next_upload_speed = speed;
         let config = crate::CONFIG.get().unwrap();
-        let speed = self.uploaded(config.min_upload_rate, config.max_upload_rate);
         trace!(
             torrent = %self.name,
             min = config.min_upload_rate,
@@ -125,6 +172,49 @@ impl Torrent {
             leechers = self.leechers,
             "compute_speeds"
         );
+    }
+
+    /// Instantaneous fake upload rate (bytes/s) at elapsed time `t` seconds
+    /// (measured from `self.origin`). Pure function of (speed_seed, t): the SAME
+    /// function backs both the live dashboard display and the announce integral,
+    /// so the declared total always equals the area under the displayed curve.
+    pub fn speed_at(&self, t: f64) -> f64 {
+        if !self.can_upload() {
+            return 0.0;
+        }
+        let cfg = crate::CONFIG.get().unwrap();
+        let (min, max) = (cfg.min_upload_rate as f64, cfg.max_upload_rate as f64);
+        let c = (max + min) * 0.5; // centre
+        let h = (max - min) * 0.5; // half-range
+        let mut s = c;
+        for i in 0..4 {
+            let omega = speed_omega(self.speed_seed, i);
+            s += h * SPEED_WEIGHTS[i] * (omega * t + speed_phase(self.speed_seed, i)).sin();
+        }
+        debug_assert!(SPEED_WEIGHTS.iter().sum::<f64>() <= 1.0 + 1e-9);
+        s.clamp(min, max) // guards only f64 rounding at the extremes
+    }
+
+    /// Closed-form integral of `speed_at` over [t0, t1], in BYTES.
+    /// ∫ A·sin(ω·t + φ) dt = -(A/ω)·cos(ω·t + φ), so this is exact for any
+    /// window length and any fractional endpoints — no history buffer, no
+    /// per-step error. Returns 0 for empty/degenerate windows (and NaN).
+    pub fn integrate(&self, t0: f64, t1: f64) -> f64 {
+        if !self.can_upload() || !(t1 > t0) {
+            return 0.0;
+        }
+        let cfg = crate::CONFIG.get().unwrap();
+        let (min, max) = (cfg.min_upload_rate as f64, cfg.max_upload_rate as f64);
+        let c = (max + min) * 0.5;
+        let h = (max - min) * 0.5;
+        let mut area = c * (t1 - t0); // mean contribution, >= 0
+        for i in 0..4 {
+            let omega = speed_omega(self.speed_seed, i);
+            let ph = speed_phase(self.speed_seed, i);
+            let amp = h * SPEED_WEIGHTS[i] / omega;
+            area += amp * ((omega * t0 + ph).cos() - (omega * t1 + ph).cos());
+        }
+        area
     }
 
     // /// Load essential data from a parsed torrent using the full parsed torrent file. It reduces the RAM use to have smaller data
@@ -368,6 +458,10 @@ impl Torrent {
             min_interval: None, // Default value (from tracker response, not torrent file)
             tracker_id: None,   // Default value (from tracker response, not torrent file)
             source_path: None,  // Set by from_file() if loaded from disk
+            // fastrand::u64(..) (full range) never panics; the per-torrent seed
+            // decouples each torrent's speed curve from the others.
+            speed_seed: fastrand::u64(..),
+            origin: Instant::now(),
         })
     }
 }
@@ -376,6 +470,74 @@ impl Torrent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_speed_curve_integral_matches_trapezoid_and_bounds() {
+        // CONFIG is a global OnceCell; set it once (tolerate "already set" — we
+        // read min/max back from whatever won the race).
+        let mut cfg = crate::config::Config::default();
+        cfg.min_upload_rate = 1_048_576; // 1 MiB/s
+        cfg.max_upload_rate = 10_485_760; // 10 MiB/s
+        let _ = crate::CONFIG.set(cfg);
+        let cfg = crate::CONFIG.get().unwrap();
+        let (min, max) = (cfg.min_upload_rate as f64, cfg.max_upload_rate as f64);
+
+        let mut t = Torrent {
+            name: String::from("curve"),
+            length: 262144,
+            private: false,
+            uploaded: 0,
+            last_announce: std::time::Instant::now(),
+            info_hash: [0; 20],
+            info_hash_urlencoded: String::from("01234567"),
+            seeders: 4,
+            leechers: 16, // can_upload() == true
+            next_upload_speed: 0,
+            interval: 1800,
+            urls: Vec::new(),
+            error_count: 0,
+            encoding: None,
+            min_interval: None,
+            tracker_id: None,
+            source_path: None,
+            speed_seed: 0xDEAD_BEEF_CAFE_F00D,
+            origin: std::time::Instant::now(),
+        };
+        assert!(t.can_upload());
+
+        // (a) Closed-form integral vs a fine trapezoidal numeric integral over a
+        // long, fractional window crossing several oscillation periods.
+        let (t0, t1) = (3.5_f64, 1803.5_f64);
+        let n = 1_000_000usize;
+        let dt = (t1 - t0) / n as f64;
+        let mut trap = 0.5 * (t.speed_at(t0) + t.speed_at(t1));
+        for k in 1..n {
+            trap += t.speed_at(t0 + k as f64 * dt);
+        }
+        trap *= dt;
+        let exact = t.integrate(t0, t1);
+        let rel_err = (exact - trap).abs() / trap.max(1.0);
+        assert!(rel_err < 1e-3, "exact={exact} trap={trap} rel_err={rel_err}");
+        assert!(exact > 0.0);
+
+        // (b) Bounds hold for a dense sample across many periods.
+        for k in 0..50_000u32 {
+            let tt = k as f64 * 0.05; // 0..2500s
+            let s = t.speed_at(tt);
+            assert!(s >= min - 1.0 && s <= max + 1.0, "t={tt} s={s}");
+        }
+
+        // (c) Degenerate windows declare nothing.
+        assert_eq!(t.integrate(10.0, 10.0), 0.0);
+        assert_eq!(t.integrate(20.0, 10.0), 0.0);
+
+        // (d) Gating: no leechers => zero speed and zero area.
+        t.seeders = 0;
+        t.leechers = 0;
+        assert!(!t.can_upload());
+        assert_eq!(t.speed_at(123.4), 0.0);
+        assert_eq!(t.integrate(0.0, 1800.0), 0.0);
+    }
 
     #[test]
     fn test_can_download_or_upload() {
@@ -397,6 +559,8 @@ mod tests {
             min_interval: None,
             tracker_id: None,
             source_path: None,
+            speed_seed: 0,
+            origin: std::time::Instant::now(),
         };
         assert!(!t.can_upload());
         t.leechers = 5;
@@ -429,6 +593,8 @@ mod tests {
             min_interval: None,
             tracker_id: None,
             source_path: None,
+            speed_seed: 0,
+            origin: std::time::Instant::now(),
         };
         let speed = t.uploaded(16, 64);
         assert!(speed > 0);
