@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>&gt;Ratio</title>
+<style>
+:root{
+  --cy:#36c5f4; --gn:#41e07a; --yl:#f2c66b; --rd:#f06c75; --dm:#5f6672;
+  --bg:#070a09; --panel:#0e1310; --line:#1f2a22; --fg:#b7c0b8; --fgb:#e6f0e6;
+  --mono:"SF Mono","JetBrains Mono","Menlo",ui-monospace,Consolas,monospace;
+  --glow:0 0 5px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:#000;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:12.5px;line-height:1.32;color:var(--fg);overflow:hidden}
+
+#term{width:660px;background:var(--bg);border:1px solid var(--line);border-radius:7px;
+  box-shadow:0 20px 60px rgba(0,0,0,.7),0 0 0 1px rgba(65,224,122,.04);overflow:hidden;position:relative}
+/* CRT scanlines + vignette overlay */
+#term::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:5;
+  background:repeating-linear-gradient(rgba(0,0,0,0) 0 2px, rgba(0,0,0,.16) 2px 3px);
+  mix-blend-mode:multiply}
+#term::before{content:"";position:absolute;inset:0;pointer-events:none;z-index:6;
+  background:radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,.35) 100%)}
+
+.tbar{display:flex;align-items:center;gap:7px;padding:6px 9px;background:var(--panel);border-bottom:1px solid var(--line)}
+.tl{width:11px;height:11px;border-radius:50%}
+.tl.r{background:#ff5f57}.tl.y{background:#febc2e}.tl.g{background:#28c840}
+.tbar .ttl{margin-left:6px;color:var(--dm);font-size:11.5px}
+.tbar .ttl b{color:var(--cy)}
+
+.scr{padding:7px 10px 4px;white-space:pre;font-variant-numeric:tabular-nums;min-height:380px}
+.br{color:var(--line)} .cy{color:var(--cy);text-shadow:var(--glow) rgba(54,197,244,.5)}
+.gn{color:var(--gn);text-shadow:var(--glow) rgba(65,224,122,.45)} .yl{color:var(--yl)}
+.rd{color:var(--rd)} .dm{color:var(--dm)} .b{color:var(--fgb)}
+.f{color:var(--gn)} .fdl{color:var(--yl)} .e{color:#243024}
+.inv{background:var(--cy);color:#001018;text-shadow:none}
+.inv .dm,.inv .b,.inv .gn,.inv .yl,.inv .f,.inv .e,.inv .cy{color:#001018;text-shadow:none}
+
+/* command line */
+.cli{padding:5px 10px 8px;border-top:1px solid var(--line);background:var(--panel);white-space:pre;position:relative;z-index:7}
+.cli .ps{color:var(--gn);text-shadow:var(--glow) rgba(65,224,122,.5)}
+.cli #cmd{color:var(--fgb)}
+.cur{display:inline-block;width:.62ch;background:var(--gn);box-shadow:var(--glow) rgba(65,224,122,.6);animation:blink 1.05s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.keybar{background:#0a0d0b;border-top:1px solid var(--line);padding:4px 10px;font-size:10.5px;color:var(--dm);white-space:pre;position:relative;z-index:7}
+.keybar b{color:#001018;background:var(--dm);border-radius:3px;padding:0 4px}
+</style>
+</head>
+<body>
+<div id="term">
+  <div class="tbar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span>
+    <span class="ttl"><b>&gt;Ratio</b> — ratioup -c ~/.config/RatioUp/config.toml</span></div>
+  <div class="scr" id="scr"></div>
+  <div class="cli"><span class="ps">ratioup&gt; </span><span id="cmd"></span><span class="cur" id="cur">&nbsp;</span></div>
+  <div class="keybar" id="keys"></div>
+</div>
+
+<script>
+const SP=['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+const STEPS=[0.25,0.5,1,2,4,8];
+const PERIODS=[1200,90,23,7],W=[0.45,0.25,0.18,0.12];
+const w=64; // inner char width
+
+function hmix(s,i,k){let h=(s^(i*40503+k))>>>0;h=Math.imul(h^h>>>15,0x85EBCA6B)>>>0;h=Math.imul(h^h>>>13,0xC2B2AE35)>>>0;return((h^h>>>16)>>>0)/2**32;}
+function spd(seed,t,mn,mx,m,can){if(!can)return 0;const c=(mx+mn)/2,h=(mx-mn)/2;let s=c;
+  for(let i=0;i<4;i++){const ww=2*Math.PI/(PERIODS[i]*(1+(hmix(seed,i,7)-.5)*.12));s+=h*W[i]*Math.sin(ww*t+hmix(seed,i,3)*6.283);}
+  return Math.min(Math.max(s,mn),mx)*m;}
+function fb(b){b=Math.max(0,b);const K=1024,M=K*K,G=M*K,T=G*K;
+  if(b<K)return b.toFixed(0)+'B';if(b<M)return(b/K).toFixed(0)+'K';if(b<G)return(b/M).toFixed(1)+'M';if(b<T)return(b/G).toFixed(1)+'G';return(b/T).toFixed(2)+'T';}
+const pad=(s,n)=>{s=String(s);return s.length>=n?s.slice(0,n):s+' '.repeat(n-s.length);};
+const plen=h=>h.replace(/<[^>]+>/g,'').length; // visible length of html
+function fit(html,n){const p=plen(html);return p>=n?html:html+' '.repeat(n-p);} // pad colored html to n cols
+function ebar(done,total,n,dl){const f=total<=0?0:Math.min(n,Math.round(n*done/total));
+  return '<span class="dm">[</span><span class="'+(dl?'fdl':'f')+'">'+'#'.repeat(f)+'</span><span class="e">'+'-'.repeat(n-f)+'</span><span class="dm">]</span>';}
+
+const st={now:0,spin:0,mi:2,sel:0,paused:false,minUp:8192,maxUp:2097152,cmd:'',booted:false,events:[]};
+const T=[
+ {n:'ubuntu-22.04-desktop-amd64.iso',S:156,L:12,up:45.2e9,seed:111,state:'S',dl:100},
+ {n:'fedora-39-workstation.iso',     S:45, L:8, up:0,     seed:222,state:'D',dl:62},
+ {n:'debian-12.1-netinst.iso',       S:234,L:0, up:8.9e9, seed:333,state:'I',dl:100},
+ {n:'archlinux-2024.12.iso',         S:0,  L:0, up:1.2e9, seed:444,state:'E',dl:100},
+ {n:'proxmox-ve-8.2.iso',            S:63, L:4, up:12.7e9,seed:555,state:'S',dl:100},
+];
+[['>','ubuntu','announce 156 peers'],['*','fedora','S:45 L:8 int:1800s'],['^','ubuntu','+2.3M up'],
+ ['!','archlinux','tracker: failure reason'],['*','proxmox','S:63 L:4']].forEach((e,i)=>st.events.push({t:i*7,g:e[0],n:e[1],m:e[2]}));
+
+const mult=()=>STEPS[st.mi]*(st.paused?0:1);
+const can=t=>t.state==='S'&&!st.paused&&((t.S>0&&t.L>0)||t.L>1);
+const live=t=>can(t)?spd(t.seed,st.now,st.minUp,st.maxUp,mult(),true):0;
+
+function render(){
+  const br=s=>'<span class="br">'+s+'</span>';
+  const L='─'.repeat(w);
+  let o='';
+  const upt=String(st.now/3600|0).padStart(2,'0')+':'+String(st.now%3600/60|0).padStart(2,'0')+':'+String(st.now%60|0).padStart(2,'0');
+  const title=' &gt;Ratio ', right=' '+SP[st.spin]+'  x'+mult().toFixed(2)+'  up '+upt+' ';
+  const fill=w-plen(title)-plen(right);
+  o+=br('╭')+'<span class="cy b">'+title+'</span>'+br('─'.repeat(Math.max(0,fill)))+'<span class="dm">'+right+'</span>'+br('╮')+'\n';
+  const cl=' client <span class="b">transmission-4.1.1</span>  peer <span class="dm">-TR4110-bf0dd2…</span>  key <span class="dm">5D8BA306</span>';
+  o+=br('│')+fit(cl,w)+br('│')+'\n';
+  o+=br('├'+L+'┤')+'\n';
+  o+=br('│')+'<span class="dm">'+pad(' '+pad('TORRENT',25)+pad('S',5)+pad('L',5)+pad('UP/s',9)+pad('TOTAL',7)+'NEXT',w)+'</span>'+br('│')+'\n';
+  T.forEach((t,i)=>{
+    const dot=t.state==='S'?'<span class="gn">●</span>':t.state==='D'?'<span class="yl">●</span>':t.state==='E'?'<span class="rd">●</span>':'<span class="dm">●</span>';
+    const u=live(t);
+    const sp=t.state==='D'?'DL'+t.dl+'%':t.state==='E'?'-':u>0?fb(u):'idle';
+    const nx=t.state==='E'||st.paused?'--':String((1800-(st.now%1800))/60|0).padStart(2,'0')+':'+String((1800-(st.now%1800))%60).padStart(2,'0');
+    const Sc=t.state==='E'?'<span class="dm">'+pad('-',5)+'</span>':'<span class="gn">'+pad(t.S,5)+'</span>';
+    const Lc=t.L>0?'<span class="gn">'+pad(t.L,5)+'</span>':'<span class="dm">'+pad(t.state==='E'?'-':t.L,5)+'</span>';
+    const spc=t.state==='D'?'<span class="yl">'+pad(sp,9)+'</span>':u>0?'<span class="yl">'+pad(sp,9)+'</span>':'<span class="dm">'+pad(sp,9)+'</span>';
+    let row=' '+dot+' '+'<span class="'+(i===st.sel?'b':'')+'">'+pad(t.n,23)+'</span>'+Sc+Lc+spc+'<span class="b">'+pad(fb(t.up),7)+'</span><span class="dm">'+nx+'</span>';
+    row=fit(row,w);
+    o+=br('│')+(i===st.sel?'<span class="inv">'+row+'</span>':row)+br('│')+'\n';
+  });
+  const ts=T[st.sel];
+  const lbl=ts.state==='D'?'downloading':'next announce';
+  o+=br('│')+fit(' <span class="dm">'+pad(lbl,13)+'</span> '+ebar(ts.state==='D'?ts.dl:(1800-(st.now%1800)),ts.state==='D'?100:1800,32,ts.state==='D'),w)+br('│')+'\n';
+  o+=br('├─ recent '+'─'.repeat(w-9)+'┤')+'\n';
+  st.events.slice(-4).forEach(e=>{
+    const gc=e.g==='!'?'rd':e.g==='^'?'yl':e.g==='>'?'cy':'gn';
+    const tt=String((st.now-e.t)/60|0).padStart(2,'0')+':'+String((st.now-e.t)%60|0).padStart(2,'0');
+    o+=br('│')+fit(' <span class="dm">'+tt+'</span> <span class="'+gc+'">'+e.g+'</span> <span class="dm">'+e.n+': '+e.m+'</span>',w)+br('│')+'\n';
+  });
+  o+=br('├'+L+'┤')+'\n';
+  const tot=T.reduce((a,t)=>a+t.up,0),s=T.reduce((a,t)=>a+live(t),0),er=T.filter(t=>t.state==='E').length;
+  const foot=' <span class="b">'+T.length+'</span> torrents  <span class="gn">↑ '+fb(tot)+'</span>  <span class="yl">up '+fb(s)+'/s</span>  '+(er?'<span class="rd">err '+er+'</span>':'<span class="dm">err 0</span>')+(st.paused?'  <span class="rd">[PAUSED]</span>':'');
+  o+=br('│')+fit(foot,w)+br('│')+'\n';
+  o+=br('╰'+L+'╯');
+  document.getElementById('scr').innerHTML=o;
+  document.getElementById('keys').innerHTML='<b>↑↓</b> sel  <b>+/-</b> speed  <b>p</b> pause  <b>:</b> cmd  type <span class="dm">help</span>  <span style="float:right">'+SP[st.spin]+'</span>';
+}
+
+/* ---- command line REPL (the "wow" feature) ---- */
+function runCmd(raw){
+  const c=raw.trim(),a=c.split(/\s+/),v=a[0]?.toLowerCase();
+  const ev=(g,n,m)=>st.events.push({t:st.now,g,n,m});
+  if(!v){}
+  else if(v==='help')ev('>','sys','cmds: speed +/-, mult <n>, pause, resume, add <name>, rm <i>, sel <i>, theme, clear');
+  else if(v==='speed'){if(a[1]==='+')st.mi=Math.min(5,st.mi+1);else if(a[1]==='-')st.mi=Math.max(0,st.mi-1);ev('^','sys','multiplier x'+mult().toFixed(2));}
+  else if(v==='mult'){const n=STEPS.indexOf(parseFloat(a[1]));if(n>=0){st.mi=n;ev('^','sys','multiplier x'+mult().toFixed(2));}else ev('!','sys','mult: 0.25|0.5|1|2|4|8');}
+  else if(v==='pause'){st.paused=true;ev('!','sys','globally paused');}
+  else if(v==='resume'){st.paused=false;ev('>','sys','resumed');}
+  else if(v==='add'){const nm=(a.slice(1).join(' ')||'newtorrent')+'.iso';T.push({n:nm,S:(Math.random()*120|0)+5,L:(Math.random()*15|0)+1,up:0,seed:(Math.random()*9e8|0),state:'D',dl:0});ev('+',nm.split('-')[0],'added (downloading)');}
+  else if(v==='rm'){const i=parseInt(a[1])-1;if(T[i]){ev('-',T[i].n.split('-')[0],'removed');T.splice(i,1);st.sel=Math.min(st.sel,T.length-1);}else ev('!','sys','rm <index 1..'+T.length+'>');}
+  else if(v==='sel'){const i=parseInt(a[1])-1;if(T[i]!==undefined&&i>=0)st.sel=i;}
+  else if(v==='theme')ev('>','sys','(thème simulé)');
+  else if(v==='clear')st.events=[];
+  else ev('!','sys','commande inconnue: '+v+'  (help)');
+  render();
+}
+
+/* ---- boot/typing intro ---- */
+const BOOT=[
+ ['dm','$ ratioup -c ~/.config/RatioUp/config.toml'],
+ ['dm','loading configuration…'],
+ ['gn','client=auto → detected Transmission 4.1.1  (-TR4110-, key 5D8BA306)'],
+ ['gn','min_up=8K  max_up=2M  download_phase=on  warmup=on'],
+ ['cy','watching ~/.local/share/RatioUp for .torrent files'],
+ ['gn','5 torrent(s) loaded · announcing STARTED…'],
+ ['dm','starting scheduler — super-shell ready.'],
+];
+async function boot(){
+  const scr=document.getElementById('scr');
+  let acc='';
+  for(const [cls,line] of BOOT){
+    for(let i=0;i<line.length;i++){
+      scr.innerHTML=acc+'<span class="'+cls+'">'+line.slice(0,i+1)+'</span><span class="cur">&nbsp;</span>';
+      await new Promise(r=>setTimeout(r,7+Math.random()*16));
+    }
+    acc+='<span class="'+cls+'">'+line+'</span>\n';
+    await new Promise(r=>setTimeout(r,90));
+  }
+  await new Promise(r=>setTimeout(r,260));
+  st.booted=true;render();startLoops();
+}
+function startLoops(){
+  setInterval(()=>{st.spin=(st.spin+1)%10;if(st.booted)render();},120);
+  setInterval(()=>{st.now++;T.forEach(t=>{if(t.state==='D'){t.dl=Math.min(100,t.dl+2);if(t.dl>=100){t.state='S';st.events.push({t:st.now,g:'^',n:t.n.split('-')[0],m:'completed → seeding'});}}
+    if(can(t)){const u=live(t);if(u>0)t.up+=u;}});if(st.booted)render();},1000);
+  // random feed
+  (function feed(){setTimeout(()=>{if(!st.paused){const t=T[Math.random()*T.length|0];if(t)st.events.push({t:st.now,g:t.state==='E'?'!':['*','>'][Math.random()*2|0],n:t.n.split('-')[0],m:t.state==='E'?'tracker failure':['peers updated','announce sent'][Math.random()*2|0]});}feed();},6000+Math.random()*12000);})();
+}
+
+document.addEventListener('keydown',e=>{
+  if(!st.booted)return;
+  const cmdEl=document.getElementById('cmd');
+  // typing mode if there's any command text or printable key
+  if(e.key.length===1&&!e.metaKey&&!e.ctrlKey&&!(['+','-','p'].includes(e.key)&&st.cmd==='')){
+    st.cmd+=e.key;cmdEl.textContent=st.cmd;e.preventDefault();return;
+  }
+  if(e.key==='Backspace'){st.cmd=st.cmd.slice(0,-1);cmdEl.textContent=st.cmd;e.preventDefault();return;}
+  if(e.key==='Enter'){runCmd(st.cmd);st.cmd='';cmdEl.textContent='';e.preventDefault();return;}
+  if(e.key==='ArrowDown'){st.sel=Math.min(T.length-1,st.sel+1);render();}
+  else if(e.key==='ArrowUp'){st.sel=Math.max(0,st.sel-1);render();}
+  else if(e.key==='+'||e.key==='='){st.mi=Math.min(5,st.mi+1);render();}
+  else if(e.key==='-'){st.mi=Math.max(0,st.mi-1);render();}
+  else if(e.key==='p'&&st.cmd===''){st.paused=!st.paused;render();}
+});
+boot();
+</script>
+</body>
+</html>
