@@ -1,10 +1,19 @@
 use std::str::FromStr;
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use toml::Value;
 use tracing::{error, info, warn};
 
+use crate::transmission;
+
 // use crate::json_output;
+
+/// Constant uppercase-hex session key for the HTTP announce path, set once in
+/// init_client and read in build_url. The UDP path keeps using client.key (u32);
+/// both serialize the SAME key. A real Transmission sends an 8-hex-uppercase
+/// `key=` that never changes during a session.
+pub static KEY_HEX: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -173,27 +182,42 @@ impl Config {
 
 /// Init the client from the configuration and returns the interval to refresh client key if applicable
 pub async fn init_client(config: &Config) -> Option<u16> {
-    let mut client = fake_torrent_client::Client::default();
-    match fake_torrent_client::clients::ClientVersion::from_str(&config.client) {
-        Ok(selected) => {
-            client.build(selected);
+    let client = if config.client.eq_ignore_ascii_case("auto") {
+        // Faithful, self-contained emulation of the locally installed
+        // Transmission version (or nearest fallback). Follows updates on relaunch.
+        transmission::build_auto_client()
+    } else {
+        // Legacy path: explicit crate profile by exact enum name.
+        let mut c = fake_torrent_client::Client::default();
+        match fake_torrent_client::clients::ClientVersion::from_str(&config.client) {
+            Ok(selected) => {
+                c.build(selected);
+            }
+            Err(e) => {
+                error!(
+                    "Client {} does not exist, using default one: {e}",
+                    config.client
+                );
+            }
         }
-        Err(e) => {
-            error!(
-                "Client {} does not exist, using default one: {e}",
-                config.client
-            );
-        }
-    }
-    // Work around a fake-torrent-client (0.9.11) bug: generate_key() builds a
-    // hex string but parses it as DECIMAL u32, which fails for any key with a-f,
-    // leaving client.key == 0. A constant key=0 is a detectable fingerprint on
-    // private trackers, so synthesize a real random non-zero key when that
-    // happens. See ensure_client_key().
-    ensure_client_key(&mut client);
+        // Work around a fake-torrent-client (0.9.11) bug: generate_key() builds a
+        // hex string but parses it as DECIMAL u32, which fails for any key with
+        // a-f, leaving client.key == 0. A constant key=0 is a detectable
+        // fingerprint, so synthesize a real random non-zero key when that happens.
+        ensure_client_key(&mut c);
+        c
+    };
+
+    // Preformat the uppercase-hex key ONCE from the final u32 so the HTTP path
+    // (hex) and the UDP path (key.to_be_bytes()) serialize the SAME key, constant
+    // for the whole session. Real Transmission sends 8 hex uppercase, not decimal.
+    let _ = KEY_HEX.set(format!("{:08X}", client.key));
+
     info!(
-        "Client {} (key: {:#010x}, peer ID:{})",
-        client.name, client.key, client.peer_id
+        "Client {} (key: {}, peer ID: {})",
+        client.name,
+        KEY_HEX.get().map(String::as_str).unwrap_or(""),
+        client.peer_id
     );
     let key_interval = client.key_refresh_every;
     let mut guard = crate::CLIENT.write().await;

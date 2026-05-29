@@ -357,11 +357,13 @@ async fn announce_http(
         .build()
         .expect("Failed to build reqwest client");
 
-    let (url_template, headers_to_set) = client.get_query();
-    let mut full_url = String::from(url);
-    full_url.push(if full_url.contains('?') { '&' } else { '?' });
-    full_url.push_str(&url_template);
-    let (built_url, uploaded) = build_url(url, torrent, event, client.key.clone().to_string()).await;
+    // headers_to_set carries the client's User-Agent/Accept/Accept-Encoding.
+    // (The query template is built inside build_url, not from here.)
+    let (_url_template, headers_to_set) = client.get_query();
+    // Inject the key as 8 uppercase hex (constant per session), like a real
+    // Transmission — not the decimal `client.key.to_string()` used before.
+    let key_hex = crate::config::KEY_HEX.get().cloned().unwrap_or_default();
+    let (built_url, uploaded) = build_url(url, torrent, event, key_hex).await;
     info!("Announce HTTP URL {built_url}");
 
     let mut request_builder = reqwest_client.get(&built_url);
@@ -562,13 +564,17 @@ pub async fn build_url(
     //build URL list
     let client = (*CLIENT.read().await).clone().unwrap();
     let mut port = 55555u16;
-    let mut numwant = 80u16;
     if let Some(config) = CONFIG.get() {
         port = config.port;
-        if let Some(nw) = config.numwant {
-            numwant = nw;
-        }
     }
+    // numwant = 0 on STOPPED (like a real Transmission), else the config override
+    // or the client profile's num_want (80 for Transmission). Deriving from the
+    // profile means future client profiles auto-track.
+    let numwant: u16 = if event == Some(Event::Stopped) {
+        client.num_want_on_stop
+    } else {
+        CONFIG.get().and_then(|c| c.numwant).unwrap_or(client.num_want)
+    };
     let mut result = String::from(url);
     result.push(if result.contains('?') { '&' } else { '?' });
     result.push_str(&client.query);
