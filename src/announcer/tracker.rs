@@ -49,21 +49,48 @@ pub enum Event {
 const WARMUP_MIN_SECS: u64 = 30;
 const WARMUP_MAX_SECS: u64 = 90;
 
-/// Clamp `t.interval` to a short warm-up window if the torrent can now upload,
-/// so the scheduler re-announces soon after STARTED. Returns the effective wait.
-pub fn apply_warmup(t: &mut Torrent) -> u64 {
-    if t.can_upload() {
-        let mut warmup = fastrand::u64(WARMUP_MIN_SECS..=WARMUP_MAX_SECS);
-        // Honor the tracker's minimum announce interval, if any.
-        if let Some(min) = t.min_interval {
-            warmup = warmup.max(min);
-        }
-        // Only shorten — never lengthen past what the tracker asked for.
-        if warmup < t.interval {
-            t.interval = warmup;
-        }
+/// When the torrent can't upload yet (no leechers) but is alive on the tracker
+/// (has seeders), re-check sooner than the full interval so a leecher that
+/// appears is noticed quickly instead of up to ~1h later.
+const RECHECK_NO_LEECHER_MIN_SECS: u64 = 300; // 5 min
+const RECHECK_NO_LEECHER_MAX_SECS: u64 = 600; // 10 min
+
+/// Shorten `t.interval` to `[lo, hi]` (randomized), but never below the
+/// tracker's `min interval` and never LONGER than what the tracker asked for.
+fn shorten_interval(t: &mut Torrent, lo: u64, hi: u64) -> u64 {
+    let mut delay = fastrand::u64(lo..=hi);
+    if let Some(min) = t.min_interval {
+        delay = delay.max(min);
+    }
+    if delay < t.interval {
+        t.interval = delay;
     }
     t.interval
+}
+
+/// Post-STARTED warm-up: if the torrent CAN upload (has leechers), schedule the
+/// next announce in 30-90s so fake upload starts promptly instead of waiting the
+/// tracker's full interval. Called ONCE after a STARTED announce. If it can't
+/// upload yet, fall through to the no-leecher re-check below. Returns the wait.
+pub fn apply_warmup(t: &mut Torrent) -> u64 {
+    if t.can_upload() {
+        shorten_interval(t, WARMUP_MIN_SECS, WARMUP_MAX_SECS)
+    } else {
+        apply_recheck(t)
+    }
+}
+
+/// Periodic re-check pacing: if the torrent still can't upload (0 leechers) but
+/// the swarm is alive (has seeders), poll again in 5-10 min instead of waiting
+/// the tracker's full interval (up to ~1h) — so a leecher that appears is caught
+/// quickly. If it CAN upload, leave the tracker's interval as-is (normal cadence;
+/// we must NOT keep hammering at warm-up speed, which risks a ban). Returns wait.
+pub fn apply_recheck(t: &mut Torrent) -> u64 {
+    if !t.can_upload() && (t.seeders > 0 || t.leechers > 0) {
+        shorten_interval(t, RECHECK_NO_LEECHER_MIN_SECS, RECHECK_NO_LEECHER_MAX_SECS)
+    } else {
+        t.interval
+    }
 }
 
 pub async fn announce_started() -> u64 {
@@ -198,6 +225,14 @@ pub async fn announce(torrent: &mut Torrent, event: Option<Event>) {
                 }
             ),
         );
+        // Announce to every tracker in the announce-list, but AGGREGATE the
+        // peer counts instead of letting each response clobber the previous one.
+        // A torrent with two trackers where the 2nd returns incomplete=0 would
+        // otherwise wipe a valid leecher count from the 1st (→ no upload). We
+        // keep the max seen across all trackers (a peer counted by any tracker
+        // is real), then write it back once the loop is done.
+        let mut max_seeders: u16 = 0;
+        let mut max_leechers: u16 = 0;
         for url in torrent.urls.clone() {
             debug!("\t{}", url);
             if url.to_lowercase().starts_with("udp://") {
@@ -205,7 +240,11 @@ pub async fn announce(torrent: &mut Torrent, event: Option<Event>) {
             } else {
                 announce_http(&url, torrent, client, event).await;
             }
+            max_seeders = max_seeders.max(torrent.seeders);
+            max_leechers = max_leechers.max(torrent.leechers);
         }
+        torrent.seeders = max_seeders;
+        torrent.leechers = max_leechers;
         info!(
             "Anounced: interval={}, event={:?}, downloaded=0, uploaded={}, seeders={}, leechers={}, torrent={}",
             torrent.interval,
@@ -385,18 +424,20 @@ async fn announce_http(
                                     }
                                 }
 
-                                // number of peers with the entire file, i.e. seeders (integer)
+                                // number of peers with the entire file, i.e. seeders (integer).
+                                // Clamp to u16::MAX rather than `as u16` (which would WRAP:
+                                // 65536 -> 0, silently zeroing a huge count and blocking upload).
                                 if let Some(BencodeValue::Integer(value)) =
                                     dict.get(b"complete".as_ref())
                                 {
-                                    torrent.seeders = *value as u16;
+                                    torrent.seeders = (*value).clamp(0, u16::MAX as i64) as u16;
                                 }
 
-                                // number of leechers (integer)
+                                // number of leechers (integer), same clamp.
                                 if let Some(BencodeValue::Integer(value)) =
                                     dict.get(b"incomplete".as_ref())
                                 {
-                                    torrent.leechers = *value as u16;
+                                    torrent.leechers = (*value).clamp(0, u16::MAX as i64) as u16;
                                 }
 
                                 // b"peers" not handled

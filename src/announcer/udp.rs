@@ -328,8 +328,10 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
             // Update torrent state on successful announce
             torrent.uploaded += uploaded;
             torrent.interval = response.interval as u64;
-            torrent.seeders = response.seeders as u16;
-            torrent.leechers = response.leechers as u16;
+            // Clamp instead of `as u16` to avoid wrapping a >65535 count to a
+            // small/zero value (which would block upload on a big swarm).
+            torrent.seeders = response.seeders.min(u16::MAX as u32) as u16;
+            torrent.leechers = response.leechers.min(u16::MAX as u32) as u16;
             torrent.last_announce = std::time::Instant::now();
             torrent.error_count = 0;
 
