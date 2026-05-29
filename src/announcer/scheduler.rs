@@ -42,6 +42,11 @@ pub async fn run(wait_time: u64) {
                 if t.should_announce() {
                     debug!(torrent = %t.name, "⏰ time to announce");
                     super::tracker::announce(&mut t, None).await;
+                    // The announce resets interval to the tracker's value. If
+                    // the torrent still has 0 leechers, shorten it again so we
+                    // re-check in minutes instead of waiting the full interval.
+                    // (Does nothing if it can now upload — normal cadence then.)
+                    super::tracker::apply_recheck(&mut t);
                 }
                 // Always update min_interval based on time until next announce
                 min_interval = u64::min(min_interval, time_until_announce);
