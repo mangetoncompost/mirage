@@ -39,6 +39,34 @@ pub enum Event {
     Stopped,
 }
 
+/// Extract a peer count from a `complete`/`incomplete` value that may be either
+/// a bencode Integer (the textbook form) OR a ByteString of ASCII digits (some
+/// non-conformant private trackers). Returns None if the key is absent/garbage.
+fn bencode_count(v: Option<&BencodeValue>) -> Option<u64> {
+    match v {
+        Some(BencodeValue::Integer(n)) => Some((*n).max(0) as u64),
+        Some(BencodeValue::ByteString(b)) => std::str::from_utf8(b)
+            .ok()
+            .and_then(|s| s.trim().parse::<i64>().ok())
+            .map(|n| n.max(0) as u64),
+        _ => None,
+    }
+}
+
+/// Count peers from a compact ByteString (fixed-size records of `record_len`
+/// bytes) or a non-compact List of peer dictionaries. `record_len` is 6 for
+/// IPv4 (`peers`) and 18 for IPv6 (`peers6`). Used as a fallback leecher signal
+/// for trackers that omit `incomplete`.
+fn count_peers(v: Option<&BencodeValue>, record_len: usize) -> u64 {
+    match v {
+        Some(BencodeValue::ByteString(b)) if !b.is_empty() && b.len() % record_len == 0 => {
+            (b.len() / record_len) as u64
+        }
+        Some(BencodeValue::List(list)) => list.len() as u64,
+        _ => 0,
+    }
+}
+
 /// After a STARTED announce, a real client doesn't wait the tracker's full
 /// interval (often 30 min) before its first stats update — it reports progress
 /// fairly soon. We mirror that: once the STARTED response tells us the swarm has
@@ -424,23 +452,35 @@ async fn announce_http(
                                     }
                                 }
 
-                                // number of peers with the entire file, i.e. seeders (integer).
-                                // Clamp to u16::MAX rather than `as u16` (which would WRAP:
-                                // 65536 -> 0, silently zeroing a huge count and blocking upload).
-                                if let Some(BencodeValue::Integer(value)) =
-                                    dict.get(b"complete".as_ref())
-                                {
-                                    torrent.seeders = (*value).clamp(0, u16::MAX as i64) as u16;
-                                }
+                                // Robustly extract seeders/leechers. Many (esp.
+                                // private) trackers diverge from the textbook
+                                // `complete`/`incomplete` integers:
+                                //   - they OMIT incomplete (or complete) and only
+                                //     ship a `peers` list/blob → we must COUNT it;
+                                //   - they send the counts as STRINGS not integers;
+                                //   - they ship IPv6 peers in `peers6`.
+                                // RatioUp used to read only the integer keys and
+                                // ignore `peers`, so such trackers showed L:0 and
+                                // never uploaded. We now take the MAX of the
+                                // declared count and the actual peer count.
+                                let complete = bencode_count(dict.get(b"complete".as_ref()));
+                                let incomplete = bencode_count(dict.get(b"incomplete".as_ref()));
+                                let peer_count = count_peers(dict.get(b"peers".as_ref()), 6)
+                                    .saturating_add(count_peers(dict.get(b"peers6".as_ref()), 18));
 
-                                // number of leechers (integer), same clamp.
-                                if let Some(BencodeValue::Integer(value)) =
-                                    dict.get(b"incomplete".as_ref())
-                                {
-                                    torrent.leechers = (*value).clamp(0, u16::MAX as i64) as u16;
+                                if let Some(s) = complete {
+                                    torrent.seeders = s.min(u16::MAX as u64) as u16;
                                 }
-
-                                // b"peers" not handled
+                                // Leechers = max(declared incomplete, peers we can
+                                // see). If incomplete is absent, the peer count is
+                                // the only signal; if present, peers can only
+                                // confirm/raise it (compact peer lists are usually
+                                // leechers from the tracker's perspective).
+                                let declared_leechers = incomplete.unwrap_or(0);
+                                let leechers = declared_leechers.max(peer_count);
+                                if incomplete.is_some() || peer_count > 0 {
+                                    torrent.leechers = leechers.min(u16::MAX as u64) as u16;
+                                }
 
                                 // Accumulate the fake uploaded bytes we just
                                 // declared to the tracker (mirrors the UDP path,
@@ -577,6 +617,61 @@ pub async fn build_url(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bencode::BencodeDecoder;
+
+    /// Decode a bencode dict and extract (seeders, leechers) the way announce_http
+    /// now does, so we can assert the robust parsing across real-world tracker
+    /// response shapes (missing incomplete, peers list, string ints, ipv6).
+    fn parse_counts(body: &[u8]) -> (u64, u64) {
+        let mut dec = BencodeDecoder::new(body);
+        let dict = match dec.decode().unwrap() {
+            BencodeValue::Dictionary(d) => d,
+            _ => panic!("not a dict"),
+        };
+        let complete = bencode_count(dict.get(b"complete".as_ref())).unwrap_or(0);
+        let incomplete = bencode_count(dict.get(b"incomplete".as_ref()));
+        let peer_count = count_peers(dict.get(b"peers".as_ref()), 6)
+            .saturating_add(count_peers(dict.get(b"peers6".as_ref()), 18));
+        let leechers = incomplete.unwrap_or(0).max(peer_count);
+        (complete, leechers)
+    }
+
+    #[test]
+    fn test_leecher_parsing_robust_across_tracker_shapes() {
+        // Textbook: complete + incomplete integers.
+        assert_eq!(parse_counts(b"d8:completei247e10:incompletei3e8:intervali1800ee"), (247, 3));
+
+        // Private tracker that OMITS incomplete and only ships a compact peers
+        // blob (3 IPv4 peers = 18 bytes). Must count the peers as leechers.
+        let mut body = Vec::new();
+        body.extend_from_slice(b"d8:intervali1800e5:peers18:");
+        body.extend_from_slice(&[0u8; 18]);
+        body.push(b'e');
+        assert_eq!(parse_counts(&body), (0, 3));
+
+        // peers as a non-compact LIST of 2 dicts, no incomplete.
+        // ("10.0.0.1" is 8 chars → 8:10.0.0.1)
+        let listbody = b"d8:completei247e8:intervali1800e5:peersld2:ip8:10.0.0.14:porti1eed2:ip8:10.0.0.24:porti2eeee";
+        assert_eq!(parse_counts(listbody), (247, 2));
+
+        // counts sent as STRINGS instead of integers (non-conformant tracker).
+        // ("incomplete" is 10 chars → 10:incomplete)
+        assert_eq!(parse_counts(b"d8:complete3:24710:incomplete1:3e"), (247, 3));
+
+        // IPv6 peers6 (18 bytes = 1 peer), empty peers.
+        let mut v6 = Vec::new();
+        v6.extend_from_slice(b"d8:completei247e5:peers0:6:peers618:");
+        v6.extend_from_slice(&[0u8; 18]);
+        v6.push(b'e');
+        assert_eq!(parse_counts(&v6), (247, 1));
+
+        // declared incomplete wins when larger than visible peers.
+        let mut mix = Vec::new();
+        mix.extend_from_slice(b"d10:incompletei50e5:peers6:");
+        mix.extend_from_slice(&[0u8; 6]);
+        mix.push(b'e');
+        assert_eq!(parse_counts(&mix), (0, 50));
+    }
 
     /// Reproduces the `{event}` substitution rule build_url applies, on the real
     /// query template shipped by fake-torrent-client. A periodic announce
