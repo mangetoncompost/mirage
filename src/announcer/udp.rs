@@ -285,13 +285,16 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
         }
     };
 
-    // Calculate uploaded bytes since last announce
-    let elapsed: u64 = if event == Some(Event::Started) {
+    // Declared upload = exact integral of the time-varying speed curve over the
+    // window since the last announce (same model as the HTTP path). STARTED
+    // declares 0. Window derived from last_announce → idempotent per announce.
+    let uploaded: u64 = if event == Some(Event::Started) {
         0
     } else {
-        torrent.last_announce.elapsed().as_secs()
+        let t1 = torrent.origin.elapsed().as_secs_f64();
+        let t0 = (t1 - torrent.last_announce.elapsed().as_secs_f64()).max(0.0);
+        torrent.integrate(t0, t1).round().max(0.0) as u64
     };
-    let uploaded: u64 = torrent.next_upload_speed as u64 * elapsed;
 
     // Convert peer_id to fixed-size array
     let peer_id_bytes = client.peer_id.as_bytes();

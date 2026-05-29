@@ -63,7 +63,9 @@ pub async fn snapshot_torrents() -> Vec<TorrentView> {
                     name: t.name.clone(),
                     seeders: t.seeders,
                     leechers: t.leechers,
-                    up_speed: t.next_upload_speed,
+                    // Instantaneous speed off the same curve that backs the
+                    // declared integral — 4 sins, synchronous, no .await.
+                    up_speed: t.speed_at(t.origin.elapsed().as_secs_f64()).round() as u32,
                     uploaded: t.uploaded,
                     interval: t.interval,
                     secs_to_announce: t.interval.saturating_sub(elapsed),
