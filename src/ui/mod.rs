@@ -9,6 +9,7 @@
 
 pub mod draw;
 mod events;
+pub mod keys;
 mod render;
 mod snapshot;
 

@@ -2,12 +2,43 @@
 // https://wiki.theory.org/BitTorrent_Tracker_Protocol
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 use tracing::trace;
 
 use crate::announcer::tracker::is_supported_url;
 use crate::bencode::{BencodeDecoder, BencodeDecoderError, BencodeValue, encode_bencode_value};
 use crate::utils::{get_sha1, percent_encoding};
+
+/// Global upload-speed multiplier ladder, shared lock-free by the render path
+/// (display) and the announce path (declared integral). The UP/DOWN arrow keys
+/// walk this array and saturate at the ends; index 2 (== 1.0) is the default.
+///
+/// INVARIANT — coherence ceiling: the top step (8.0) is the ONLY ceiling. We do
+/// NOT add a separate per-frame clamp in `speed_at`, because `integrate` has no
+/// matching clamp; a clamp in one but not the other would break the
+/// "declared bytes == area under the displayed curve" identity. Multiplying both
+/// functions by the same scalar keeps them exactly proportional, so the identity
+/// holds at every step. 8.0 means the effective peak is at most max_upload_rate*8.
+pub const SPEED_STEPS: [f64; 6] = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0];
+const DEFAULT_STEP: usize = 2; // == 1.0
+pub static SPEED_STEP_IDX: AtomicUsize = AtomicUsize::new(DEFAULT_STEP);
+
+/// Current global speed multiplier. `Relaxed` is correct: a lone scalar with no
+/// other memory published alongside it; a one-frame-late read is harmless.
+#[inline]
+pub fn speed_multiplier() -> f64 {
+    SPEED_STEPS[SPEED_STEP_IDX.load(Ordering::Relaxed).min(SPEED_STEPS.len() - 1)]
+}
+
+/// Walk the multiplier ladder by `delta` (+1 = Up, -1 = Down), saturating at the
+/// ends. Called only from the TTY key thread (single writer). Returns the new factor.
+pub fn bump_multiplier(delta: isize) -> f64 {
+    let cur = SPEED_STEP_IDX.load(Ordering::Relaxed) as isize;
+    let next = (cur + delta).clamp(0, SPEED_STEPS.len() as isize - 1) as usize;
+    SPEED_STEP_IDX.store(next, Ordering::Relaxed);
+    SPEED_STEPS[next]
+}
 
 /// Errors that can occur when parsing a Torrent struct from Bencode.
 #[derive(Debug)]
@@ -192,7 +223,11 @@ impl Torrent {
             s += h * SPEED_WEIGHTS[i] * (omega * t + speed_phase(self.speed_seed, i)).sin();
         }
         debug_assert!(SPEED_WEIGHTS.iter().sum::<f64>() <= 1.0 + 1e-9);
-        s.clamp(min, max) // guards only f64 rounding at the extremes
+        // Scale by the global multiplier AFTER the [min,max] rounding guard. The
+        // multiplier is the same scalar `integrate` applies, so display and
+        // declared stay exactly proportional. It is 1.0 in non-TTY mode → identical
+        // numeric behaviour to before.
+        s.clamp(min, max) * speed_multiplier()
     }
 
     /// Closed-form integral of `speed_at` over [t0, t1], in BYTES.
@@ -214,7 +249,12 @@ impl Torrent {
             let amp = h * SPEED_WEIGHTS[i] / omega;
             area += amp * ((omega * t0 + ph).cos() - (omega * t1 + ph).cos());
         }
-        area
+        // Same global multiplier as `speed_at`, applied to the whole window. A
+        // linear factor commutes with integration, so declared bytes == area
+        // under the displayed (scaled) curve. The factor in force when integrate()
+        // runs (announce time) scales the whole window — not applied retroactively
+        // per keypress; the bounded one-window discrepancy is accepted.
+        area * speed_multiplier()
     }
 
     // /// Load essential data from a parsed torrent using the full parsed torrent file. It reduces the RAM use to have smaller data
