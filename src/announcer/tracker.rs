@@ -46,8 +46,8 @@ pub enum Event {
 /// warm-up delay instead of the full interval, so fake upload starts promptly.
 /// The tracker's real interval is restored on that next announce. We never go
 /// below the tracker's `min interval` if it sent one.
-const WARMUP_MIN_SECS: u64 = 60;
-const WARMUP_MAX_SECS: u64 = 180;
+const WARMUP_MIN_SECS: u64 = 30;
+const WARMUP_MAX_SECS: u64 = 90;
 
 /// Clamp `t.interval` to a short warm-up window if the torrent can now upload,
 /// so the scheduler re-announces soon after STARTED. Returns the effective wait.
