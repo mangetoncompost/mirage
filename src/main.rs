@@ -159,16 +159,32 @@ async fn main() {
 
     // Live dashboard render task (TTY only) + shutdown signal it listens on.
     let (sd_tx, sd_rx) = tokio::sync::watch::channel(false);
+    // Key thread -> shutdown coordinator wake-up (TTY only). In raw mode Ctrl+C
+    // arrives as a key, not SIGINT, so the key thread pings this channel.
+    let (key_tx, mut key_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    // Lets the key thread leave its poll loop when shutdown comes from SIGINT.
+    let key_running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+
     if tui {
         tokio::spawn(ui::run(sd_rx));
+        // TTY ONLY: never spawned in non-TTY mode, so SPEED_STEP_IDX stays at the
+        // default (x1.0) and behaviour is bit-identical to before there.
+        ui::keys::spawn(key_running.clone(), key_tx);
     }
 
     tokio::spawn(async move {
-        // graceful exit when Ctrl + C / SIGINT
-        tokio::signal::ctrl_c().await.unwrap();
+        // Graceful exit on Ctrl+C: real SIGINT (non-TTY, or external `kill -INT`)
+        // OR the q / Ctrl+C-as-key the dashboard reads under raw mode.
+        tokio::select! {
+            r = tokio::signal::ctrl_c() => { let _ = r; }
+            _ = key_rx.recv() => {}
+        }
+        // Let the key thread leave its poll loop (exit(0) would kill it anyway).
+        key_running.store(false, std::sync::atomic::Ordering::Relaxed);
         // Tear down the dashboard first so logs/exit messages land on the real
         // screen. exit(0) skips Drop, so restore() must be called explicitly;
-        // it is idempotent and safe even if the TUI never started.
+        // it is idempotent, now also disables raw mode, and is safe even if the
+        // TUI never started.
         let _ = sd_tx.send(true);
         ui::draw::restore();
         info!("Exiting...");

@@ -301,7 +301,11 @@ pub fn build_frame(f: &Frame, width: u16) -> String {
     //   ┌─ RatioUp ───────────────────── ⠹ 02:14:07 ─┐
     {
         let title = " RatioUp ";
-        let right = format!(" {spin} {uptime} ");
+        // Global upload multiplier (always x1.00 in non-TTY mode). Two decimals
+        // so the 0.25/0.50 sub-unity steps read exactly. The fill computation
+        // below subtracts dwidth(&right), so the wider segment is auto-accounted.
+        let mult = crate::torrent::speed_multiplier();
+        let right = format!(" x{mult:.2} {spin} {uptime} ");
         // inner cells consumed by title + right; the rest is horizontal fill.
         let fill = inner.saturating_sub(dwidth(title) + dwidth(&right));
         let mut top = String::new();
