@@ -51,7 +51,9 @@ impl Default for Config {
             torrent_dir: PathBuf::from("."),
             //client: fake_torrent_client::Client::from(fake_torrent_client::clients::ClientVersion::Qbittorrent_4_4_2),
             // key_refresh_every: 0,
-            client: String::from("Transmission_3_00"),
+            // "auto" detects & faithfully emulates the locally installed
+            // Transmission version (falls back to a built-in profile if absent).
+            client: String::from("auto"),
             output_stats: None,
         }
     }
