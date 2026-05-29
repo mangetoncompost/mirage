@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>&gt;Ratio — GUI</title>
+<style>
+:root{
+  --c-header:#4ec9ff; --c-ok:#4ec96a; --c-warn:#e5c07b; --c-err:#e06c75; --c-dim:#808080;
+  --bg:#181a20; --bg-elev:#1e2128; --bg-elev2:#23262e; --bg-sel:#2a2e37;
+  --fg:#c8ccd4; --fg-bright:#e8ebf0; --line:#2a2e37;
+  --download:var(--c-warn);
+  --glow:0 0 6px rgba(78,201,255,.45); --radius:10px;
+  --mono:"JetBrains Mono","Fira Code","SF Mono",ui-monospace,"Cascadia Mono",Consolas,"Liberation Mono",monospace;
+  --fs:13px;
+}
+[data-theme="light"]{ --bg:#f5f6f8;--bg-elev:#fff;--bg-elev2:#eceef2;--bg-sel:#e2e6ee;
+  --fg:#2b2f36;--fg-bright:#111;--line:#d6dae2;
+  --c-header:#1d7fb8;--c-ok:#2f9e44;--c-warn:#b8860b;--c-err:#c0392b;--c-dim:#7a7f87; }
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font-family:var(--mono);font-size:var(--fs);line-height:1.45;background:var(--bg);color:var(--fg);
+  -webkit-font-smoothing:antialiased;font-variant-ligatures:none;
+  display:grid;grid-template-columns:172px 1fr;grid-template-rows:auto 1fr auto;
+  grid-template-areas:"rail topbar" "rail main" "rail status";overflow:hidden}
+.tabular,.uptime,.mult,.s,.l,.next,.up,.spd{font-variant-numeric:tabular-nums}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--bg-sel);border-radius:6px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* RAIL */
+#rail{grid-area:rail;background:var(--bg-elev);border-right:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden}
+.rail-brand{padding:16px 14px 14px;font-weight:700;color:var(--c-header);text-shadow:var(--glow);font-size:16px;letter-spacing:.5px}
+.rail-brand .chev{color:var(--c-header)}
+.rail-item{display:flex;align-items:center;gap:10px;padding:9px 14px;border:0;border-left:2px solid transparent;
+  background:none;color:var(--fg);font:inherit;cursor:pointer;text-align:left;width:100%}
+.rail-item:hover{background:var(--bg-elev2)}
+.rail-item.active{background:var(--bg-sel);border-left-color:var(--c-header);color:var(--fg-bright)}
+.rail-item .glyph{width:18px;text-align:center;opacity:.85}
+.rail-item .hk{margin-left:auto;font-size:10px;color:var(--c-dim);background:var(--bg-elev2);border-radius:4px;padding:1px 5px}
+.rail-spacer{flex:1}
+.rail-foot{padding:10px 14px;font-size:10px;color:var(--c-dim);border-top:1px solid var(--line)}
+
+/* TOPBAR */
+#topbar{grid-area:topbar;display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(--bg-elev);border-bottom:1px solid var(--line)}
+#topbar .gstate{display:flex;align-items:center;gap:6px;color:var(--c-ok)}
+#topbar .gstate.paused{color:var(--c-err)}
+.spacer{flex:1}
+.mult-ctl{display:flex;align-items:center;gap:6px;background:var(--bg-elev2);border:1px solid var(--line);border-radius:8px;padding:3px 6px}
+.mult-ctl button{width:24px;height:22px;border:0;background:var(--bg-sel);color:var(--fg-bright);border-radius:5px;cursor:pointer;font:inherit}
+.mult-ctl .mval{min-width:52px;text-align:center}
+.tbtn{background:var(--bg-elev2);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:5px 11px;cursor:pointer;font:inherit}
+.tbtn:hover{border-color:var(--c-header);color:var(--fg-bright)}
+.tbtn.accent{border-color:var(--c-header);color:var(--c-header)}
+
+/* MAIN */
+#content{grid-area:main;overflow:auto;padding:16px}
+section[data-tab]{display:none}
+section[data-tab].active{display:block}
+h2.tt{margin:0 0 14px;font-size:15px;color:var(--c-header);font-weight:700}
+h2.tt .sub{color:var(--c-dim);font-weight:400;font-size:12px;margin-left:8px}
+
+/* STATUS */
+#statusbar{grid-area:status;display:flex;align-items:center;gap:18px;padding:7px 16px;background:var(--bg-elev);
+  border-top:1px solid var(--line);font-size:12px;flex-wrap:wrap}
+#statusbar .ok{color:var(--c-ok)} #statusbar .warn{color:var(--c-warn)} #statusbar .err{color:var(--c-err)} #statusbar .dim{color:var(--c-dim)}
+.badge-paused{color:var(--c-err);border:1px solid var(--c-err);border-radius:5px;padding:1px 7px;font-size:11px}
+
+/* DASHBOARD BOARD */
+#dash{border:1px solid var(--line);border-radius:var(--radius);background:var(--bg);overflow:hidden;max-width:1080px}
+.board-top{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.board-top .brand{color:var(--c-header);font-weight:700;text-shadow:var(--glow)}
+.board-top .spinner{color:var(--c-header);text-shadow:var(--glow);width:1ch;display:inline-block}
+.board-top .topfill{flex:1;border-bottom:1px dashed var(--line);height:1px}
+.board-top .uptime{color:var(--fg-bright)}
+.board-client{padding:8px 14px;border-bottom:1px solid var(--line);color:var(--fg);font-size:12px}
+.board-client .lab{color:var(--c-dim)} .board-client .val{color:var(--fg-bright)}
+.table-head,.trow{display:grid;grid-template-columns:1fr 4ch 4ch 11ch 12ch 7ch 20ch;gap:8px;align-items:center;padding:5px 14px}
+.table-head{color:var(--c-dim);border-bottom:1px solid var(--line);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+.trow{border-bottom:1px solid var(--bg-elev2);cursor:pointer}
+.trow:hover{background:var(--bg-elev)}
+.trow .tname{display:flex;align-items:center;gap:7px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.trow:hover .tname .nm{color:var(--fg-bright)}
+.dot{font-size:11px}
+.dot.seeding{color:var(--c-ok)} .dot.downloading{color:var(--c-warn)} .dot.idle{color:var(--c-dim)}
+.dot.error{color:var(--c-err)} .dot.paused{color:var(--c-dim)}
+.col-s.hi{color:var(--c-ok)} .col-s.mid{color:var(--c-warn)} .col-s.lo{color:var(--c-dim)}
+.col-l.hi{color:var(--c-ok)} .col-l.lo{color:var(--c-dim)}
+.spd.up{color:var(--c-warn)} .spd.dl{color:var(--c-warn)} .spd.idle{color:var(--c-dim)}
+.next.soon{color:var(--c-warn)} .next.dim{color:var(--c-dim)}
+.bar{font-family:var(--mono);letter-spacing:-.5px;white-space:nowrap}
+.bar .f{color:var(--c-ok)} .bar .fdl{color:var(--c-warn)} .bar .e{color:var(--c-dim)} .bar .cap{color:var(--c-dim)}
+.feed-sep{display:flex;align-items:center;gap:8px;padding:6px 14px;color:var(--c-dim);font-size:11px}
+.feed-sep .ln{flex:1;border-top:1px solid var(--line)}
+#feed{max-height:200px;overflow:auto;padding:0 14px 10px}
+.ev{display:flex;gap:8px;padding:2px 0;font-size:12px;animation:fade .4s ease}
+.ev .ts{color:var(--c-dim)} .ev .g{width:1.4ch} .ev .en{color:var(--fg)} .ev .em{color:var(--c-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ev.ok .g{color:var(--c-ok)} .ev.warn .g{color:var(--c-warn)} .ev.err .g{color:var(--c-err)} .ev.info .g{color:var(--c-header)}
+@keyframes fade{from{opacity:0;transform:translateY(-3px)}to{opacity:1}}
+.more{padding:5px 14px;color:var(--c-dim);font-size:12px}
+
+/* GENERIC SETTINGS */
+.acc{border:1px solid var(--line);border-radius:var(--radius);margin-bottom:12px;background:var(--bg-elev);max-width:920px}
+.acc>summary{cursor:pointer;padding:10px 14px;font-weight:700;color:var(--fg-bright);list-style:none;display:flex;align-items:center;gap:8px}
+.acc>summary::before{content:"▸";color:var(--c-header);transition:transform .15s}
+.acc[open]>summary::before{transform:rotate(90deg)}
+.acc .body{padding:6px 14px 14px;border-top:1px solid var(--line)}
+.ctl{display:grid;grid-template-columns:260px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bg-elev2)}
+.ctl:last-child{border-bottom:0}
+.ctl .k{color:var(--fg)} .ctl .k .note{display:block;color:var(--c-dim);font-size:11px;margin-top:2px}
+.ctl .v{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.readout{color:var(--c-header);background:var(--bg-elev2);border-radius:6px;padding:3px 8px;font-size:12px}
+.readout.ok{color:var(--c-ok)}.readout.warn{color:var(--c-warn)}.readout.dim{color:var(--c-dim)}
+input[type=range]{accent-color:var(--c-header);width:200px}
+input[type=number],input[type=text],select,textarea{background:var(--bg-elev2);color:var(--fg-bright);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit}
+select{cursor:pointer}
+textarea{width:100%;min-height:160px;resize:vertical}
+.toggle{position:relative;width:42px;height:23px;border-radius:13px;background:var(--bg-sel);border:1px solid var(--line);cursor:pointer;flex:0 0 auto}
+.toggle::after{content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:var(--c-dim);transition:.15s}
+.toggle[aria-pressed=true]{background:rgba(78,201,255,.25);border-color:var(--c-header)}
+.toggle[aria-pressed=true]::after{left:21px;background:var(--c-header)}
+.warnbox{color:var(--c-warn);border:1px solid var(--c-warn);border-radius:6px;padding:6px 10px;font-size:12px;margin-top:6px}
+
+/* TABLES (torrents/trackers) */
+table.grid{border-collapse:collapse;width:100%;max-width:1080px;font-size:12px}
+table.grid th,table.grid td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--bg-elev2)}
+table.grid th{color:var(--c-dim);cursor:pointer;border-bottom:1px solid var(--line);user-select:none}
+table.grid tr:hover td{background:var(--bg-elev)}
+.pill{border-radius:5px;padding:1px 7px;font-size:11px;border:1px solid var(--line)}
+.pill.http{color:var(--c-header)} .pill.udp{color:var(--c-warn)}
+.st-ok{color:var(--c-ok)}.st-err{color:var(--c-err)}.st-pending{color:var(--c-warn)}
+
+/* SPARK + CANVAS */
+.spark{font-size:15px;letter-spacing:1px;color:var(--c-ok);text-shadow:var(--glow)}
+canvas{background:var(--bg);border:1px solid var(--line);border-radius:8px;display:block;max-width:100%}
+
+/* DRAWER + MODALS */
+#scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:.18s;z-index:40}
+#scrim.on{opacity:1;pointer-events:auto}
+#drawer{position:fixed;right:0;top:0;height:100vh;width:min(420px,92vw);background:var(--bg-elev);border-left:1px solid var(--line);
+  transform:translateX(100%);transition:.2s;z-index:50;padding:16px;overflow:auto}
+#drawer.on{transform:none}
+#drawer h3{margin:0 0 12px;color:var(--c-header)}
+#modalHost{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:60;padding:20px}
+#modalHost.on{display:flex}
+.modal{background:var(--bg-elev);border:1px solid var(--line);border-radius:var(--radius);max-width:680px;width:100%;max-height:86vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.modal .mh{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.modal .mh .x{margin-left:auto;cursor:pointer;color:var(--c-dim);border:0;background:none;font:inherit;font-size:16px}
+.modal .mb{padding:14px 16px}
+.subtabs{display:flex;gap:6px;margin-bottom:12px}
+.subtabs button{background:var(--bg-elev2);border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:4px 12px;cursor:pointer;font:inherit}
+.subtabs button.active{border-color:var(--c-header);color:var(--c-header)}
+#toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:70}
+.toast{background:var(--bg-elev2);border:1px solid var(--line);border-left:3px solid var(--c-ok);border-radius:8px;padding:9px 14px;animation:fade .3s;max-width:340px}
+.toast.warn{border-left-color:var(--c-warn)} .toast.err{border-left-color:var(--c-err)}
+.kbd{background:var(--bg-elev2);border:1px solid var(--line);border-radius:5px;padding:1px 7px;font-size:11px;color:var(--fg-bright)}
+.row-actions button{background:none;border:0;color:var(--c-dim);cursor:pointer;font:inherit;padding:2px 5px}
+.row-actions button:hover{color:var(--fg-bright)}
+body.reduce *{animation:none!important;transition:none!important}
+</style>
+</head>
+<body data-theme="dark">
+
+<nav id="rail">
+  <div class="rail-brand"><span class="chev">&gt;</span>Ratio</div>
+  <button class="rail-item active" data-go="dashboard"><span class="glyph">▦</span>Dashboard<span class="hk">1</span></button>
+  <button class="rail-item" data-go="torrents"><span class="glyph">≡</span>Torrents<span class="hk">2</span></button>
+  <button class="rail-item" data-go="trackers"><span class="glyph">🛰</span>Trackers<span class="hk">3</span></button>
+  <button class="rail-item" data-go="speeds"><span class="glyph">∿</span>Speeds<span class="hk">4</span></button>
+  <button class="rail-item" data-go="client"><span class="glyph">◈</span>Client&nbsp;&amp;&nbsp;Stealth<span class="hk">5</span></button>
+  <button class="rail-item" data-go="schedule"><span class="glyph">◷</span>Scheduling<span class="hk">6</span></button>
+  <button class="rail-item" data-go="network"><span class="glyph">⇄</span>Network<span class="hk">7</span></button>
+  <button class="rail-item" data-go="logs"><span class="glyph">≣</span>Logs<span class="hk">8</span></button>
+  <button class="rail-item" data-go="config"><span class="glyph">⚙</span>Config<span class="hk">9</span></button>
+  <div class="rail-spacer"></div>
+  <div class="rail-foot">mockup · données simulées<br>aucune connexion réelle</div>
+</nav>
+
+<header id="topbar">
+  <button class="tbtn" id="hamb" title="Quick drawer (S)">⚙ Réglages rapides</button>
+  <div class="gstate" id="gstate"><span>●</span><span id="gstateLbl">En marche</span></div>
+  <div class="spacer"></div>
+  <div class="mult-ctl"><button id="multDown" title="↓">−</button><span class="mval mult" id="multVal">x1.00</span><button id="multUp" title="↑">+</button></div>
+  <button class="tbtn accent" id="addBtn" title="Ajouter (T)">➕ Torrent</button>
+  <button class="tbtn" id="pauseBtn" title="Pause globale (Ctrl+P)">⏸ Pause</button>
+  <button class="tbtn" id="helpBtn" title="Raccourcis (?)">?</button>
+</header>
+
+<main id="content"><!-- sections injected/visible per tab --></main>
+
+<footer id="statusbar"><!-- totals --></footer>
+
+<div id="scrim"></div>
+<aside id="drawer"><h3>&gt; réglages rapides</h3><div id="drawerBody"></div></aside>
+<div id="modalHost"><div class="modal" id="modal"></div></div>
+<div id="toasts"></div>
+
+<script>
+/* ============================ RatioUp GUI mockup ============================
+   Single file, vanilla JS, fully fake data. Faithful to the real tool's
+   palette, sum-of-sines speed curve, download phase, client emulation, etc. */
+
+/* ----- deterministic RNG (repeatable session) ----- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+const rng=mulberry32(0x5A710);
+const rint=(lo,hi)=>Math.floor(lo+rng()*(hi-lo+1));
+
+/* ----- helpers ----- */
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+function fmtBytes(b){b=Math.max(0,b);const K=1024,M=K*1024,G=M*1024,T=G*1024;
+  if(b<K)return b.toFixed(0)+' B';if(b<M)return(b/K).toFixed(1)+' KB';if(b<G)return(b/M).toFixed(1)+' MB';
+  if(b<T)return(b/G).toFixed(1)+' GB';return(b/T).toFixed(2)+' TB';}
+function fmtHMS(s){s=Math.max(0,Math.floor(s));const h=(s/3600|0),m=(s%3600/60|0),x=s%60;
+  return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(x).padStart(2,'0');}
+function fmtMMSS(s){if(s<0)return'--:--';const m=(s/60|0);if(m>=100)return(m/60|0)+'h';return String(m).padStart(2,'0')+':'+String(s%60|0).padStart(2,'0');}
+function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+/* ----- sum-of-sines speed curve (port of torrent.rs speed_at) ----- */
+const SPEED_STEPS=[0.25,0.5,1.0,2.0,4.0,8.0];
+const PERIODS=[1200,90,23,7], WEIGHTS=[0.45,0.25,0.18,0.12];
+function hmix(seed,i,salt){let h=(seed^(i*0x9E37+salt))>>>0;h=Math.imul(h^h>>>15,0x85EBCA6B)>>>0;h=Math.imul(h^h>>>13,0xC2B2AE35)>>>0;return((h^h>>>16)>>>0)/4294967296;}
+function omega(seed,i){const j=1+(hmix(seed,i,7)-0.5)*0.12;return 2*Math.PI/(PERIODS[i]*j);}
+function phase(seed,i){return hmix(seed,i,3)*2*Math.PI;}
+function speedAt(seed,t,min,max,mult,canUp){if(!canUp)return 0;const c=(max+min)/2,h=(max-min)/2;let s=c;
+  for(let i=0;i<4;i++)s+=h*WEIGHTS[i]*Math.sin(omega(seed,i)*t+phase(seed,i));
+  return Math.min(Math.max(s,min),max)*mult;}
+
+/* ----- progress bar (port of render.rs progress_bar) ----- */
+function bar(done,total,w){const f=total<=0?0:Math.min(w,Math.round(w*done/total));
+  let h='<span class="bar"><span class="cap">▕</span>';
+  h+='<span class="'+(state._dlbar?'fdl':'f')+'">'+'█'.repeat(f)+'</span>';
+  h+='<span class="e">'+'░'.repeat(w-f)+'</span><span class="cap">▏</span></span>';return h;}
+const SPINNER=['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+const SPARK='▁▂▃▄▅▆▇█';
+
+/* ============================ STATE + MOCK DATA ============================ */
+function mkTorrent(o){return Object.assign({
+  uploaded:0,downloaded:0,seeders:0,leechers:0,interval:1800,lastAnnounce:0,errorCount:0,
+  paused:false,overrideMult:1.0,ratioTarget:0,speedSeed:rint(1,2**31),dlRate:rint(1e6,6e6),
+  trackers:[],
+},o);}
+function trk(url,proto,s,l){return{url,proto,s,l,lastMs:rint(20,180),lastAt:rint(20,400),errs:0,status:'ok'};}
+
+const state={
+  bootEpoch:0, now:0, spinner:0, multIdx:2, globalPause:false, masterEnable:true,
+  activeTab:'dashboard', autoScroll:true, _dlbar:false,
+  spark:Array(60).fill(0), events:[], logs:[],
+  caps:{dailyUsed:0.62, weeklyUsed:0.41},
+  client:{name:'Transmission 4.1.1',detected:'4.1.1',peer:'-TR4110-bf0dd2puquxi',key:'5D8BA306',ua:'Transmission/4.1.1',port:54321},
+  cfg:{
+    port:54321,minUp:8192,maxUp:2097152,minDl:8192,maxDl:16777216,numwant:80,numwantStop:0,
+    client:'auto',torrentDir:'~/.local/share/RatioUp',outputStats:'/tmp/RatioUp.json',usePid:false,
+    jitterPct:5,curve:'Balanced',downloadPhase:true,canUploadGate:true,warmup:true,warmupRange:'30-90',
+    http11:false,headerRandomize:false,ipv4:true,ipv6:false,keyRotation:'Never',customPrefix:'',
+    seedMode:'always',nightStart:22,nightEnd:6,dailyCap:0,weeklyCap:0,ratioRamp:false,rampDays:10,
+    connTimeout:10,maxRetries:3,backoff:'exponential jitter',connLimit:16,socketBuf:65536,randomPort:true,
+    theme:'dark',fontSize:13,refreshMs:500,scanlines:false,reduceMotion:false,compact:false,
+    logLevel:'info',advancedMode:false,notifications:true,
+  },
+  torrents:[
+    mkTorrent({id:1,name:'ubuntu-22.04-desktop-amd64.iso',infohash:'da fc8c076ca2f3ed376eae7c76a0d6be2415c45'.replace(/ /g,''),length:3.8e9,uploaded:45.2e9,downloaded:3.8e9,state:'seeding',seeders:156,leechers:12,interval:1800,trackers:[trk('http://torrent.ubuntu.com/announce','HTTP',156,12),trk('https://ipv6.torrent.ubuntu.com/announce','HTTP',140,9)]}),
+    mkTorrent({id:2,name:'fedora-39-workstation-x86_64.iso',infohash:'9a0c11d43d8fb92000f1b3389b8b800f0a8100',length:2.2e9,downloaded:1.364e9,uploaded:0,state:'downloading',seeders:45,leechers:8,dlRate:9e6,trackers:[trk('udp://tracker.fedoraproject.org:6969/announce','UDP',45,8)]}),
+    mkTorrent({id:3,name:'debian-12.1-amd64-netinst.iso',infohash:'3ce08ed362439d844d739ea25d2ea3753dfb609a',length:676e6,uploaded:8.9e9,downloaded:676e6,state:'idle',seeders:234,leechers:0,interval:1800,trackers:[trk('http://bttracker.debian.org:6969/announce','HTTP',234,0)]}),
+    mkTorrent({id:4,name:'archlinux-2024.12.01-x86_64.iso',infohash:'e9eaedd7778c67795408a58e63bce0ddb15845a1',length:923e6,uploaded:1.2e9,downloaded:923e6,state:'error',seeders:0,leechers:0,errorCount:3,interval:1800,trackers:[trk('https://tracker.archlinux.org/announce','HTTP',0,0)]}),
+    mkTorrent({id:5,name:'linuxmint-22-cinnamon-64bit.iso',infohash:'1adaf7b65e2395aabbccddeeff0011223344556',length:2.9e9,uploaded:23.4e9,downloaded:2.9e9,state:'paused',paused:true,seeders:89,leechers:5,trackers:[trk('udp://tracker.opentrackr.org:1337/announce','UDP',89,5)]}),
+    mkTorrent({id:6,name:'proxmox-ve-8.2.iso',infohash:'761b195aabbccddeeff00112233445566778899',length:1.4e9,uploaded:12.7e9,downloaded:1.4e9,state:'seeding',seeders:63,leechers:4,trackers:[trk('http://tracker.proxmox.com/announce','HTTP',63,4)]}),
+    mkTorrent({id:7,name:'openbsd-7.5-amd64-install.iso',infohash:'877327eaabbccddeeff001122334455667788ab',length:712e6,uploaded:3.1e9,downloaded:712e6,state:'seeding',seeders:21,leechers:2,trackers:[trk('udp://tracker.openbsd.org:6969/announce','UDP',21,2)]}),
+  ],
+  profiles:{builtin:['Conservative','Balanced','Aggressive','Stealth'],user:[]},
+};
+
+/* seed initial feed */
+['📡|ok|ubuntu-22.04|annonce: 156 peers','🌱|ok|fedora-39|S:45 L:8 int:1800s','⬆|warn|ubuntu-22.04|+2.3 MB/s',
+ '🔌|info|proxmox-ve|UDP connect OK','⚠|err|archlinux|tracker: failure','➕|ok|openbsd-7.5|ajouté (interval 1800s)',
+ '📡|ok|debian-12.1|annonce: 234 seeders 0 leechers','🌱|ok|proxmox-ve|S:63 L:4 int:1800s'].forEach(s=>{
+  const[g,cl,n,m]=s.split('|');state.events.push({at:rint(5,300),g,cl,n,m});});
+for(let i=0;i<40;i++)state.logs.push({at:rint(1,600),lvl:['info','debug','warn'][rint(0,2)],msg:'announce '+['ok','retry','peers updated','scheduler tick'][rint(0,3)]});
+
+/* ----- derived ----- */
+const mult=()=>SPEED_STEPS[state.multIdx]*(state.globalPause?0:1);
+function canUpload(t){return t.state==='seeding'&&!t.paused&&!state.globalPause&&(state.cfg.canUploadGate?((t.seeders>0&&t.leechers>0)||t.leechers>1):true);}
+function liveSpeed(t){if(t.state!=='seeding'||t.paused||state.globalPause)return 0;
+  return speedAt(t.speedSeed,state.now,state.cfg.minUp,state.cfg.maxUp,mult()*t.overrideMult,canUpload(t));}
+function ratio(t){return t.downloaded>0?(t.uploaded/t.downloaded):(t.uploaded>0?Infinity:0);}
+function dlPct(t){return t.length>0?Math.min(100,Math.round(t.downloaded/t.length*100)):100;}
+
+/* ============================ RENDER ============================ */
+const C=$('#content');
+function setTab(tab){state.activeTab=tab;$$('.rail-item').forEach(b=>b.classList.toggle('active',b.dataset.go===tab));renderTab();}
+function renderTab(){const t=state.activeTab;C.innerHTML='';
+  ({dashboard:rDash,torrents:rTorrents,trackers:rTrackers,speeds:rSpeeds,client:rClient,
+    schedule:rSchedule,network:rNetwork,logs:rLogs,config:rConfig}[t]||rDash)();}
+
+function rDash(){
+  C.innerHTML='<div id="dash"></div>';
+  paintDash();
+}
+function paintDash(){
+  const d=$('#dash');if(!d)return;
+  const cl=state.client;
+  let rows='';
+  const vis=state.torrents.slice(0,12);
+  vis.forEach(t=>{
+    const up=liveSpeed(t);const dl=t.state==='downloading';
+    const sCls=t.seeders>5?'hi':t.seeders>0?'mid':'lo';
+    const lCls=t.leechers>0?'hi':'lo';
+    let spd,spdCls;
+    if(dl){spd='DL '+dlPct(t)+'%';spdCls='dl';}
+    else if(t.state==='error'||t.state==='paused'||t.state==='idle'){spd=t.state==='idle'?'idle':(t.state==='paused'?'pause':'err');spdCls='idle';}
+    else if(up>0){spd=fmtBytes(up)+'/s';spdCls='up';}else{spd='idle';spdCls='idle';}
+    const elapsed=state.now-t.lastAnnounce;const next=t.paused||t.state==='error'?-1:Math.max(0,t.interval-elapsed);
+    const nextTxt=next<0?'--':fmtMMSS(next);const nextCls=next>=0&&next<30?'soon':'dim';
+    state._dlbar=dl;
+    const barHtml=dl?bar(dlPct(t),100,16):bar(t.interval-Math.max(0,next),t.interval,16);
+    rows+='<div class="trow" data-id="'+t.id+'">'+
+      '<div class="tname"><span class="dot '+t.state+'">●</span><span class="nm">'+esc(t.name)+'</span></div>'+
+      '<div class="col-s s '+sCls+'">'+(t.state==='error'?'-':t.seeders)+'</div>'+
+      '<div class="col-l l '+lCls+'">'+(t.state==='error'?'-':t.leechers)+'</div>'+
+      '<div class="spd '+spdCls+'">'+spd+'</div>'+
+      '<div class="up">'+fmtBytes(t.uploaded)+'</div>'+
+      '<div class="next '+nextCls+'">'+nextTxt+'</div>'+
+      '<div>'+barHtml+'</div></div>';
+  });
+  if(state.torrents.length>12)rows+='<div class="more">(+'+(state.torrents.length-12)+' more)…</div>';
+  let feed='';state.events.slice(-12).forEach(e=>{
+    feed+='<div class="ev '+e.cl+'"><span class="ts">'+fmtHMS(state.now-e.at).slice(0,8)+'</span>'+
+      '<span class="g">'+e.g+'</span><span class="en">'+esc(e.n.slice(0,18))+'</span><span class="em">'+esc(e.m)+'</span></div>';});
+  d.innerHTML=
+    '<div class="board-top"><span class="brand">&gt;Ratio</span><span class="spinner" id="spin">'+SPINNER[state.spinner]+'</span>'+
+      '<span class="topfill"></span><span class="mult" id="bMult">'+('x'+mult().toFixed(2))+'</span>'+
+      '<span class="uptime" id="bUp">'+fmtHMS(state.now)+'</span></div>'+
+    '<div class="board-client"><span class="lab">client</span> <span class="val">'+esc(cl.name)+'</span>'+
+      '  <span class="lab">peer</span> <span class="val">'+cl.peer+'</span>'+
+      '  <span class="lab">key</span> <span class="val">0x'+cl.key+'</span></div>'+
+    '<div class="table-head"><div>Torrent</div><div>S</div><div>L</div><div>↑ Speed</div><div>Uploaded</div><div>Next</div><div>Progress</div></div>'+
+    '<div id="rows">'+rows+'</div>'+
+    '<div class="feed-sep"><span>├─ recent</span><span class="ln"></span><label style="font-size:11px"><input type="checkbox" id="autoScroll" '+(state.autoScroll?'checked':'')+'> autoscroll</label></div>'+
+    '<div id="feed">'+feed+'</div>';
+  $('#autoScroll').onchange=e=>state.autoScroll=e.target.checked;
+  $$('#rows .trow').forEach(r=>r.onclick=()=>openDetail(+r.dataset.id));
+  const f=$('#feed');if(state.autoScroll&&f)f.scrollTop=f.scrollHeight;
+}
+
+/* ----- settings control builders ----- */
+function ctl(k,note,vhtml){return '<div class="ctl"><div class="k">'+k+(note?'<span class="note">'+note+'</span>':'')+'</div><div class="v">'+vhtml+'</div></div>';}
+function tg(key){return '<button class="toggle" role="switch" aria-pressed="'+(!!state.cfg[key])+'" data-cfg="'+key+'"></button>';}
+function num(key,min,max,step){return '<input type="number" data-cfg="'+key+'" value="'+state.cfg[key]+'" min="'+(min||0)+'" max="'+(max||9e9)+'" step="'+(step||1)+'">';}
+function txt(key){return '<input type="text" data-cfg="'+key+'" value="'+esc(state.cfg[key])+'">';}
+function sel(key,opts){return '<select data-cfg="'+key+'">'+opts.map(o=>'<option '+(state.cfg[key]==o?'selected':'')+'>'+o+'</option>').join('')+'</select>';}
+function rng_(key,min,max,step,fmt){const v=state.cfg[key];return '<input type="range" data-cfg="'+key+'" min="'+min+'" max="'+max+'" step="'+(step||1)+'" value="'+v+'"><span class="readout" id="ro-'+key+'">'+(fmt?fmt(v):v)+'</span>';}
+function acc(title,inner,open){return '<details class="acc" '+(open!==false?'open':'')+'><summary>'+title+'</summary><div class="body">'+inner+'</div></details>';}
+
+function rTorrents(){
+  C.innerHTML='<h2 class="tt">Torrents<span class="sub">'+state.torrents.length+' · clic sur une ligne = détail</span></h2>'+
+    '<table class="grid"><thead><tr><th data-sort="name">Nom</th><th data-sort="state">État</th><th data-sort="seeders">S</th><th data-sort="leechers">L</th><th data-sort="up">↑ Speed</th><th data-sort="uploaded">Uploaded</th><th data-sort="ratio">Ratio</th><th>Actions</th></tr></thead><tbody id="ttb"></tbody></table>';
+  const tb=$('#ttb');
+  state.torrents.forEach(t=>{const up=liveSpeed(t);const r=ratio(t);
+    const tr=document.createElement('tr');
+    tr.innerHTML='<td><span class="dot '+t.state+'">●</span> '+esc(t.name)+'</td>'+
+      '<td>'+(t.state==='downloading'?'DL '+dlPct(t)+'%':t.state)+'</td>'+
+      '<td>'+(t.state==='error'?'-':t.seeders)+'</td><td>'+(t.state==='error'?'-':t.leechers)+'</td>'+
+      '<td>'+(up>0?fmtBytes(up)+'/s':'—')+'</td><td>'+fmtBytes(t.uploaded)+'</td>'+
+      '<td>'+(r===Infinity?'∞':r.toFixed(2))+'</td>'+
+      '<td class="row-actions"><button data-act="detail">détail</button><button data-act="pause">'+(t.paused?'reprendre':'pause')+'</button><button data-act="remove">suppr</button></td>';
+    tr.querySelector('[data-act=detail]').onclick=()=>openDetail(t.id);
+    tr.querySelector('[data-act=pause]').onclick=()=>{t.paused=!t.paused;if(t.paused&&t.state==='seeding')t.state='paused';else if(!t.paused&&t.state==='paused')t.state='seeding';toast((t.paused?'Pause ':'Reprise ')+t.name);rTorrents();};
+    tr.querySelector('[data-act=remove]').onclick=()=>{confirmModal('Supprimer « '+t.name+' » ?',()=>{state.torrents=state.torrents.filter(x=>x.id!==t.id);pushEvent('➖','warn',t.name,'retiré, up '+fmtBytes(t.uploaded));toast('Torrent retiré');rTorrents();});};
+    tb.appendChild(tr);
+  });
+}
+
+function rTrackers(){
+  let h='<h2 class="tt">Trackers<span class="sub">santé par tracker (simulé)</span></h2>';
+  state.torrents.forEach(t=>{
+    let rows=t.trackers.map(k=>'<tr><td><span class="pill '+k.proto.toLowerCase()+'">'+k.proto+'</span> '+esc(k.url)+'</td><td>'+k.s+'</td><td>'+k.l+'</td><td>'+k.lastMs+' ms</td><td>il y a '+k.lastAt+'s</td><td class="st-'+k.status+'">'+(k.status==='ok'?'✓ ok':k.status==='err'?'✖ err':'… pending')+'</td></tr>').join('');
+    h+=acc('<span class="dot '+t.state+'">●</span> '+esc(t.name)+' <span class="note" style="font-weight:400;color:var(--c-dim)">('+t.trackers.length+' tracker(s))</span>',
+      '<table class="grid"><thead><tr><th>URL</th><th>S</th><th>L</th><th>RTT</th><th>Dernière annonce</th><th>Statut</th></tr></thead><tbody>'+rows+'</tbody></table>',false);
+  });
+  C.innerHTML=h;
+}
+
+function rSpeeds(){
+  const f=v=>fmtBytes(v)+'/s';
+  C.innerHTML='<h2 class="tt">Speeds &amp; Ratio</h2>'+
+    acc('Vitesse upload',
+      ctl('Min upload',(state.cfg.minUp)+' B/s',rng_('minUp',8192,104857600,8192,f))+
+      ctl('Max upload',(state.cfg.maxUp)+' B/s',rng_('maxUp',8192,104857600,8192,f))+
+      ctl('Courbe de vitesse','forme de l’oscillation (sum-of-sines)',sel('curve',['Smooth steady','Balanced','Jittery','Sawtooth','Square']))+
+      ctl('Multiplicateur global','↑/↓ au clavier, x0.25…x8',  '<span class="readout warn" id="ro-mult2">x'+mult().toFixed(2)+'</span>')+
+      ctl('Override par torrent','régler min/max/mult par torrent','<span class="readout dim">configurable dans le détail d’un torrent</span>'))+
+    acc('Vitesse download (phase de leech)',
+      ctl('Min download',(state.cfg.minDl)+' B/s',rng_('minDl',8192,104857600,8192,f))+
+      ctl('Max download',(state.cfg.maxDl)+' B/s',rng_('maxDl',8192,104857600,8192,f))+
+      ctl('Jitter d’annonce','±% sur l’interval (anti thundering-herd)',rng_('jitterPct',0,20,1,v=>v+'%')),false)+
+    acc('Ratio &amp; plafonds',
+      ctl('Ratio cible (stop-at-ratio)','0 = illimité','<input type="number" value="0" min="0" step="0.5" style="width:90px"> <span class="readout dim">global</span>')+
+      ctl('Ratio-ramp','monter le ratio progressivement',tg('ratioRamp')+'<span class="readout dim">sur '+state.cfg.rampDays+' j</span>'),false)+
+    acc('Courbe live + sparkline',
+      '<canvas id="curve" width="640" height="120"></canvas>'+
+      '<div style="margin-top:10px">débit total : <span class="spark" id="spark2"></span></div>',true);
+  drawCurve();
+}
+
+function rClient(){
+  const cl=state.client;
+  C.innerHTML='<h2 class="tt">Client &amp; Stealth<span class="sub">imitation d’un vrai client BitTorrent</span></h2>'+
+    acc('Profil client',
+      ctl('Profil émulé','auto = détecte le Transmission installé',sel('client',['auto','Transmission_3_00','Transmission_4_0_6','Transmission_4_1_1','Qbittorrent_4_4_2','Deluge_2_0_3']))+
+      ctl('Version détectée','depuis /Applications/Transmission.app','<span class="readout ok">'+cl.detected+'</span>')+
+      ctl('Peer ID (live)','-TRxyzs- + 12 aléatoires','<span class="readout">'+cl.peer+'</span>')+
+      ctl('User-Agent','en-tête HTTP','<span class="readout">'+cl.ua+'</span>')+
+      ctl('Clé de session','8 hex maj, constante (key_refresh=Never)','<span class="readout">'+cl.key+'</span>')+
+      ctl('Rotation de clé','Transmission ne la change jamais',sel('keyRotation',['Never','Hourly','Daily','Per-session'])))+
+    acc('Phase de download (anti-ban)',
+      ctl('Simuler le download','leech d’abord (left>0) puis seed — évite le « seeder instantané »',tg('downloadPhase'))+
+      ctl('Gating can_upload','n’uploade que s’il y a des leechers',tg('canUploadGate'))+
+      ctl('Warm-up après STARTED','1er upload en 30-90s au lieu de 30 min',tg('warmup')+'<span class="readout dim">'+state.cfg.warmupRange+'s</span>')+
+      ctl('Re-check si 0 leecher','re-annonce en 5-10 min','<span class="readout dim">300-600s</span>')+
+      '<div id="dlWarn"></div>',false)+
+    acc('Requête HTTP / réseau d’annonce',
+      ctl('numwant','peers demandés (0 sur stopped)',num('numwant',1,1000))+
+      ctl('HTTP/1.1 forcé','sinon auto (HTTP/2 si dispo)',tg('http11'))+
+      ctl('Ordre des en-têtes','aléatoire pour brouiller le fingerprint',tg('headerRandomize'))+
+      ctl('Annonce IPv4',null,tg('ipv4'))+
+      ctl('Annonce IPv6',null,tg('ipv6'))+
+      ctl('Préfixe peer_id custom','vide = auto selon le profil',txt('customPrefix')),false)+
+    acc('Ce que le tracker voit',
+      '<div class="readout" style="white-space:normal;line-height:1.6" id="trkSees"></div>',false);
+  updTrkSees();
+}
+
+function rSchedule(){
+  C.innerHTML='<h2 class="tt">Scheduling</h2>'+
+    acc('Mode de seed',
+      ctl('Mode',null,sel('seedMode',['always','only-at-night','custom-windows','weekdays-only']))+
+      ctl('Nuit : début (h)',null,num('nightStart',0,23))+
+      ctl('Nuit : fin (h)',null,num('nightEnd',0,23))+
+      ctl('Activation globale','master switch',tg('masterEnableCfg')))+
+    acc('Plafonds d’upload',
+      ctl('Cap journalier','0 = illimité','<input type="number" value="'+state.cfg.dailyCap+'" min="0" style="width:120px"> GB')+
+      ctl('Cap hebdo','0 = illimité','<input type="number" value="'+state.cfg.weeklyCap+'" min="0" style="width:120px"> GB')+
+      '<div style="margin-top:8px">Journalier : '+capBar(state.caps.dailyUsed)+' '+Math.round(state.caps.dailyUsed*100)+'%</div>'+
+      '<div style="margin-top:6px">Hebdo : '+capBar(state.caps.weeklyUsed)+' '+Math.round(state.caps.weeklyUsed*100)+'%</div>',false);
+}
+function capBar(p){const w=24,f=Math.round(w*p);const cls=p>0.8?'fdl':'f';
+  return '<span class="bar"><span class="cap">▕</span><span class="'+cls+'">'+'█'.repeat(f)+'</span><span class="e">'+'░'.repeat(w-f)+'</span><span class="cap">▏</span></span>';}
+
+function rNetwork(){
+  C.innerHTML='<h2 class="tt">Network</h2>'+
+    acc('Connexion',
+      ctl('Port d’écoute',null,num('port',1024,65535))+
+      ctl('Port aléatoire au démarrage','comme un vrai client éphémère',tg('randomPort'))+
+      ctl('Timeout connexion (s)',null,num('connTimeout',1,120))+
+      ctl('Max retries',null,num('maxRetries',0,10))+
+      ctl('Backoff sur erreur',null,sel('backoff',['exponential jitter','linear','fixed','skip']))+
+      ctl('Limite de connexions',null,num('connLimit',1,200))+
+      ctl('Fichier PID',null,tg('usePid')));
+}
+
+function rLogs(){
+  C.innerHTML='<h2 class="tt">Logs<span class="sub">événements live</span></h2>'+
+    '<div style="margin-bottom:10px;display:flex;gap:10px;align-items:center">Niveau : '+sel('logLevel',['trace','debug','info','warn','error'])+
+    ' <input type="text" id="logSearch" placeholder="filtrer…" style="flex:1;max-width:240px">'+
+    ' <button class="tbtn" id="logClear">vider</button> <button class="tbtn" id="logExport">export .txt</button></div>'+
+    '<div id="logBox" style="border:1px solid var(--line);border-radius:8px;background:var(--bg-elev);max-height:60vh;overflow:auto;padding:8px 12px;font-size:12px"></div>';
+  paintLogs();
+  $('#logSearch').oninput=paintLogs;
+  $('#logClear').onclick=()=>{confirmModal('Vider les logs ?',()=>{state.logs=[];paintLogs();});};
+  $('#logExport').onclick=()=>dl('ratioup.log',state.logs.map(l=>fmtHMS(state.now-l.at)+' ['+l.lvl+'] '+l.msg).join('\n'));
+}
+function paintLogs(){const q=($('#logSearch')?.value||'').toLowerCase();
+  $('#logBox').innerHTML=state.logs.slice(-200).filter(l=>!q||l.msg.includes(q)).map(l=>{
+    const c={trace:'dim',debug:'dim',info:'',warn:'warn',error:'err'}[l.lvl]||'';
+    return '<div><span class="ev '+c+'"><span class="ts">'+fmtHMS(state.now-l.at).slice(0,8)+'</span> <span style="color:var(--c-'+(l.lvl==='error'?'err':l.lvl==='warn'?'warn':'dim')+')">['+l.lvl+']</span> '+esc(l.msg)+'</span></div>';}).join('');}
+
+function rConfig(){
+  C.innerHTML='<h2 class="tt">Config &amp; Profils</h2>'+
+    acc('Profils',
+      ctl('Profils intégrés',null,state.profiles.builtin.map(p=>'<button class="tbtn" data-prof="'+p+'">'+p+'</button>').join(' '))+
+      ctl('Enregistrer le profil actuel',null,'<input type="text" id="profName" placeholder="nom…" style="width:160px"> <button class="tbtn" id="profSave">sauver</button>')+
+      ctl('Export',null,'<button class="tbtn" id="expToml">TOML</button> <button class="tbtn" id="expJson">JSON</button>')+
+      ctl('Reset',null,'<button class="tbtn" id="resetCfg">valeurs par défaut</button>'))+
+    acc('Interface',
+      ctl('Thème',null,sel('theme',['dark','light']))+
+      ctl('Taille police',null,rng_('fontSize',10,18,1,v=>v+'px'))+
+      ctl('Rafraîchissement',null,rng_('refreshMs',100,1000,50,v=>v+' ms'))+
+      ctl('Scanlines CRT',null,tg('scanlines'))+
+      ctl('Réduire animations',null,tg('reduceMotion'))+
+      ctl('Mode avancé','débloque l’éditeur TOML brut',tg('advancedMode')),false)+
+    acc('TOML brut (avancé)',
+      '<textarea id="rawToml" '+(state.cfg.advancedMode?'':'disabled')+'>'+esc(toToml())+'</textarea>'+
+      '<div style="margin-top:8px"><button class="tbtn" id="applyToml" '+(state.cfg.advancedMode?'':'disabled')+'>appliquer</button></div>',false);
+  $$('[data-prof]').forEach(b=>b.onclick=()=>{toast('Profil « '+b.dataset.prof+' » chargé');});
+  $('#profSave').onclick=()=>{const n=$('#profName').value||'profil';state.profiles.user.push(n);toast('Profil « '+n+' » enregistré');};
+  $('#expToml').onclick=()=>dl('config.toml',toToml());
+  $('#expJson').onclick=()=>dl('ratioup.json',JSON.stringify({client:state.cfg.client,min_upload_rate:state.cfg.minUp,max_upload_rate:state.cfg.maxUp,torrents:state.torrents.map(t=>({name:t.name,length:t.length,uploaded:t.uploaded,downloaded:t.downloaded,state:t.state,seeders:t.seeders,leechers:t.leechers}))},null,2));
+  $('#resetCfg').onclick=()=>confirmModal('Réinitialiser tous les réglages ?',()=>toast('Réglages réinitialisés'));
+  $('#applyToml')&&($('#applyToml').onclick=()=>toast('TOML appliqué'));
+}
+function toToml(){const c=state.cfg;return `client = "${c.client}"\nport = ${c.port}\nmin_upload_rate = ${c.minUp}\nmax_upload_rate = ${c.maxUp}\nmin_download_rate = ${c.minDl}\nmax_download_rate = ${c.maxDl}\nnumwant = ${c.numwant}\ntorrent_dir = "${c.torrentDir}"\noutput_stats = "${c.outputStats}"`;}
+function updTrkSees(){const el=$('#trkSees');if(!el)return;const c=state.client;
+  el.textContent='GET /announce?info_hash=%DA%FC%8C…&peer_id='+c.peer+'&port='+state.cfg.port+'&uploaded=…&downloaded=…&left=…&numwant='+state.cfg.numwant+'&key='+c.key+'&compact=1&supportcrypto=1&event=started';}
+
+/* curve canvas */
+function drawCurve(){const cv=$('#curve');if(!cv)return;const x=cv.getContext('2d');const W=cv.width,H=cv.height;
+  x.clearRect(0,0,W,H);const min=state.cfg.minUp,max=state.cfg.maxUp;
+  x.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--c-ok');x.lineWidth=2;x.beginPath();
+  for(let px=0;px<W;px++){const t=state.now-(W-px)*2;const v=speedAt(state.torrents[0].speedSeed,t,min,max,mult(),true);
+    const y=H-((v/mult()-min)/(max-min))*(H-10)-5;if(px===0)x.moveTo(px,y);else x.lineTo(px,y);}
+  x.stroke();}
+
+/* ============================ TIMERS ============================ */
+let tSpin,tSec,tFast,tFeed;
+function startTimers(){
+  clearInterval(tSpin);clearInterval(tSec);clearInterval(tFast);clearTimeout(tFeed);
+  tSpin=setInterval(()=>{if(state.globalPause)return;state.spinner=(state.spinner+1)%10;const s=$('#spin');if(s)s.textContent=SPINNER[state.spinner];},100);
+  tSec=setInterval(()=>{state.now++;if(state.activeTab==='dashboard'){const u=$('#bUp');if(u)u.textContent=fmtHMS(state.now);refreshRows();}
+    // announce wiggle
+    state.torrents.forEach(t=>{if(t.paused||t.state==='error')return;const el=state.now-t.lastAnnounce;
+      if(el>=t.interval){t.lastAnnounce=state.now;t.interval=1800+rint(-90,90);
+        if(t.state==='seeding'){t.seeders+=rint(-2,2);t.leechers=Math.max(0,t.leechers+rint(-1,1));
+          const up=liveSpeed(t);if(up>0){t.uploaded+=up*t.interval;pushEvent('⬆','warn',t.name,'+'+fmtBytes(up*t.interval));}
+          pushEvent('🌱','ok',t.name,'S:'+t.seeders+' L:'+t.leechers);}}});
+  },1000);
+  tFast=setInterval(()=>{
+    // download phase advance
+    state.torrents.forEach(t=>{if(t.state==='downloading'){t.downloaded=Math.min(t.length,t.downloaded+t.dlRate*(state.cfg.refreshMs/1000));
+      if(t.downloaded>=t.length){t.state='seeding';t.downloaded=t.length;pushEvent('⬆','ok',t.name,'completed → seed');toast(t.name+' : download terminé');}}});
+    // sparkline = total live speed
+    const tot=state.torrents.reduce((a,t)=>a+liveSpeed(t),0);
+    state.spark.push(tot);if(state.spark.length>60)state.spark.shift();
+    if(state.activeTab==='dashboard')refreshRows();
+    if(state.activeTab==='speeds'){drawCurve();const sp=$('#spark2');if(sp)sp.textContent=sparkStr();}
+    paintStatus();
+  },state.cfg.refreshMs);
+  scheduleFeed();
+}
+function scheduleFeed(){tFeed=setTimeout(()=>{if(!state.globalPause){const t=state.torrents[rint(0,state.torrents.length-1)];
+  if(t){if(t.state==='error')pushEvent('⚠','err',t.name,'tracker: failure reason');
+    else pushEvent(['📡','🌱','🔌'][rint(0,2)],'info',t.name,['annonce envoyée','peers MAJ','connect OK'][rint(0,2)]);}}
+  scheduleFeed();},rint(8000,22000));}
+function refreshRows(){if($('#dash'))paintDash();}
+function sparkStr(){const m=Math.max(1,...state.spark);return state.spark.map(v=>SPARK[Math.min(7,Math.floor(v/m*7))]).join('');}
+function pushEvent(g,cl,n,m){state.events.push({at:0,g,cl,n,m});if(state.events.length>50)state.events.shift();
+  state.logs.push({at:0,lvl:cl==='err'?'error':cl==='warn'?'warn':'info',msg:n+': '+m});if(state.logs.length>200)state.logs.shift();}
+
+/* ============================ STATUS BAR ============================ */
+function paintStatus(){const sb=$('#statusbar');const tot=state.torrents.reduce((a,t)=>a+t.uploaded,0);
+  const spd=state.torrents.reduce((a,t)=>a+liveSpeed(t),0);const err=state.torrents.filter(t=>t.state==='error').length;
+  sb.innerHTML='<span>'+state.torrents.length+' torrents</span>'+
+    '<span class="ok">↑ total '+fmtBytes(tot)+'</span>'+
+    '<span class="warn">up '+fmtBytes(spd)+'/s</span>'+
+    '<span class="'+(err>0?'err':'dim')+'">errors '+err+'</span>'+
+    (state.globalPause?'<span class="badge-paused">PAUSED</span>':'')+
+    '<span class="spacer" style="flex:1"></span><span class="dim">'+sparkStr()+'</span>';}
+
+/* ============================ MULTIPLIER ============================ */
+function bumpMult(d){state.multIdx=Math.max(0,Math.min(SPEED_STEPS.length-1,state.multIdx+d));
+  const v='x'+mult().toFixed(2);$('#multVal').textContent=v;const b=$('#bMult');if(b)b.textContent=v;
+  const r=$('#ro-mult2');if(r)r.textContent=v;const r3=$('#ro-mult');if(r3)r3.textContent=v;
+  paintStatus();}
+
+/* ============================ TOASTS / MODALS / DRAWER ============================ */
+function toast(msg,kind){const t=document.createElement('div');t.className='toast'+(kind?' '+kind:'');t.textContent=msg;$('#toasts').appendChild(t);setTimeout(()=>t.remove(),5000);}
+function openModal(html){$('#modal').innerHTML=html;$('#modalHost').classList.add('on');$('#scrim').classList.add('on');
+  const x=$('#modal .x');if(x)x.onclick=closeModal;}
+function closeModal(){$('#modalHost').classList.remove('on');$('#scrim').classList.remove('on');}
+function confirmModal(q,onYes){openModal('<div class="mh"><b>Confirmer</b><button class="x">✕</button></div><div class="mb"><p>'+esc(q)+'</p>'+
+  '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="tbtn" id="cNo">Annuler</button><button class="tbtn accent" id="cYes">OK</button></div></div>');
+  $('#cNo').onclick=closeModal;$('#cYes').onclick=()=>{closeModal();onYes&&onYes();};}
+let detailTab='details';
+function openDetail(id){const t=state.torrents.find(x=>x.id===id);if(!t)return;detailTab='details';renderDetail(t);}
+function renderDetail(t){const r=ratio(t);
+  const body={
+    details:()=>'<div class="ctl"><div class="k">État</div><div class="v"><span class="dot '+t.state+'">●</span> '+t.state+(t.state==='downloading'?' '+dlPct(t)+'%':'')+'</div></div>'+
+      (t.state==='downloading'?'<div class="ctl"><div class="k">Progression</div><div class="v">'+(state._dlbar=true,bar(dlPct(t),100,24))+'</div></div>':'')+
+      '<div class="ctl"><div class="k">Taille</div><div class="v">'+fmtBytes(t.length)+'</div></div>'+
+      '<div class="ctl"><div class="k">Uploaded / Downloaded</div><div class="v">'+fmtBytes(t.uploaded)+' / '+fmtBytes(t.downloaded)+'</div></div>'+
+      '<div class="ctl"><div class="k">Ratio</div><div class="v">'+(r===Infinity?'∞':r.toFixed(2))+'</div></div>'+
+      '<div class="ctl"><div class="k">Seeders / Leechers</div><div class="v">'+t.seeders+' / '+t.leechers+'</div></div>'+
+      '<div class="ctl"><div class="k">↑ vitesse live</div><div class="v">'+fmtBytes(liveSpeed(t))+'/s</div></div>'+
+      '<div class="ctl"><div class="k">Override multiplicateur</div><div class="v"><input type="range" min="0.1" max="10" step="0.1" value="'+t.overrideMult+'" id="ovm"><span class="readout" id="ovmRo">x'+t.overrideMult.toFixed(1)+'</span></div></div>'+
+      '<div style="display:flex;gap:8px;margin-top:12px"><button class="tbtn" id="dPause">'+(t.paused?'Reprendre':'Pause')+'</button><button class="tbtn" id="dAnn">Forcer annonce</button><button class="tbtn" id="dRm">Supprimer</button></div>',
+    trackers:()=>'<table class="grid"><thead><tr><th>URL</th><th>S</th><th>L</th><th>RTT</th><th>Statut</th></tr></thead><tbody>'+
+      t.trackers.map(k=>'<tr><td><span class="pill '+k.proto.toLowerCase()+'">'+k.proto+'</span> '+esc(k.url)+'</td><td>'+k.s+'</td><td>'+k.l+'</td><td>'+k.lastMs+'ms</td><td class="st-'+k.status+'">'+(k.status==='ok'?'✓':'✖')+'</td></tr>').join('')+'</tbody></table>',
+    events:()=>state.events.filter(e=>t.name.startsWith(e.n)||e.n.startsWith(t.name.slice(0,12))).slice(-15).map(e=>'<div class="ev '+e.cl+'"><span class="g">'+e.g+'</span> <span class="em">'+esc(e.m)+'</span></div>').join('')||'<div class="readout dim">aucun événement récent</div>',
+  };
+  openModal('<div class="mh"><span class="dot '+t.state+'">●</span><b>'+esc(t.name)+'</b><button class="x">✕</button></div>'+
+    '<div class="mb"><div style="color:var(--c-dim);font-size:11px;margin-bottom:10px">'+t.infohash.slice(0,32)+'… · '+fmtBytes(t.length)+'</div>'+
+    '<div class="subtabs"><button data-dt="details" class="'+(detailTab==='details'?'active':'')+'">Détails</button><button data-dt="trackers" class="'+(detailTab==='trackers'?'active':'')+'">Trackers</button><button data-dt="events" class="'+(detailTab==='events'?'active':'')+'">Events</button></div>'+
+    '<div id="dtBody">'+body[detailTab]()+'</div></div>');
+  $$('#modal [data-dt]').forEach(b=>b.onclick=()=>{detailTab=b.dataset.dt;renderDetail(t);});
+  const ovm=$('#ovm');if(ovm)ovm.oninput=e=>{t.overrideMult=+e.target.value;$('#ovmRo').textContent='x'+t.overrideMult.toFixed(1);};
+  const dp=$('#dPause');if(dp)dp.onclick=()=>{t.paused=!t.paused;if(t.paused&&t.state==='seeding')t.state='paused';else if(!t.paused&&t.state==='paused')t.state='seeding';renderDetail(t);};
+  const da=$('#dAnn');if(da)da.onclick=()=>{t.lastAnnounce=state.now-t.interval;pushEvent('📡','info',t.name,'annonce forcée');toast('Annonce forcée');};
+  const dr=$('#dRm');if(dr)dr.onclick=()=>{closeModal();confirmModal('Supprimer « '+t.name+' » ?',()=>{state.torrents=state.torrents.filter(x=>x.id!==t.id);toast('Retiré');renderTab();});};
+}
+function shortcutsModal(){openModal('<div class="mh"><b>Raccourcis clavier</b><button class="x">✕</button></div><div class="mb" style="line-height:2">'+
+  '<span class="kbd">↑</span>/<span class="kbd">↓</span> multiplicateur · <span class="kbd">1</span>–<span class="kbd">9</span> onglets · <span class="kbd">T</span> ajouter · <span class="kbd">P</span>/<span class="kbd">Ctrl+P</span> pause · <span class="kbd">S</span> réglages rapides · <span class="kbd">Enter</span> ouvrir torrent · <span class="kbd">Esc</span> fermer · <span class="kbd">?</span> cette aide</div>');}
+function addModal(){openModal('<div class="mh"><b>Ajouter un torrent</b><button class="x">✕</button></div><div class="mb">'+
+  '<div style="border:2px dashed var(--line);border-radius:10px;padding:26px;text-align:center;color:var(--c-dim)">Glissez un .torrent ici (simulé)<br>ou collez un magnet</div>'+
+  '<input type="text" id="magnet" placeholder="magnet:?xt=urn:btih:…" style="width:100%;margin-top:12px">'+
+  '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="tbtn accent" id="doAdd">Ajouter</button></div></div>');
+  $('#doAdd').onclick=()=>{const id=Math.max(...state.torrents.map(t=>t.id))+1;const names=['manjaro-23.iso','popos-22.04.iso','kali-2024.4.iso','nixos-24.05.iso'];
+    state.torrents.push(mkTorrent({id,name:names[rint(0,3)],infohash:'new'+id+'aabbccddeeff'.repeat(2),length:rint(7,40)*1e8,uploaded:0,downloaded:0,
+      state:state.cfg.downloadPhase?'downloading':'seeding',seeders:rint(10,120),leechers:rint(1,20),dlRate:rint(2e6,8e6),trackers:[trk('udp://tracker.example.org:1337/announce','UDP',rint(10,120),rint(1,20))]}));
+    pushEvent('➕','ok',state.torrents[state.torrents.length-1].name,'ajouté');closeModal();toast('Torrent ajouté');renderTab();paintStatus();};}
+function buildDrawer(){$('#drawerBody').innerHTML=
+  ctl('Multiplicateur',null,'<div class="mult-ctl"><button id="dM-">−</button><span class="mval" id="dMv">x'+mult().toFixed(2)+'</span><button id="dM+">+</button></div>')+
+  ctl('Min upload',null,rng_('minUp',8192,104857600,8192,v=>fmtBytes(v)+'/s'))+
+  ctl('Max upload',null,rng_('maxUp',8192,104857600,8192,v=>fmtBytes(v)+'/s'))+
+  ctl('Phase de download',null,tg('downloadPhase'))+
+  ctl('Jitter %',null,rng_('jitterPct',0,20,1,v=>v+'%'))+
+  ctl('Thème',null,sel('theme',['dark','light']))+
+  ctl('Pause globale',null,'<button class="tbtn" id="dPauseAll">'+(state.globalPause?'Reprendre':'Pause')+'</button>');
+  bindCfgInputs($('#drawerBody'));
+  $('#dM-').onclick=()=>{bumpMult(-1);$('#dMv').textContent='x'+mult().toFixed(2);};
+  $('#dM+').onclick=()=>{bumpMult(1);$('#dMv').textContent='x'+mult().toFixed(2);};
+  $('#dPauseAll').onclick=togglePause;}
+function openDrawer(){buildDrawer();$('#drawer').classList.add('on');$('#scrim').classList.add('on');}
+function closeDrawer(){$('#drawer').classList.remove('on');if(!$('#modalHost').classList.contains('on'))$('#scrim').classList.remove('on');}
+
+/* ============================ CFG BINDING ============================ */
+function bindCfgInputs(root){
+  root=root||document;
+  root.querySelectorAll('.toggle[data-cfg]').forEach(b=>b.onclick=()=>{const k=b.dataset.cfg;state.cfg[k]=!state.cfg[k];b.setAttribute('aria-pressed',state.cfg[k]);onCfg(k);});
+  root.querySelectorAll('input[data-cfg],select[data-cfg]').forEach(el=>{
+    el.oninput=()=>{const k=el.dataset.cfg;let v=el.type==='number'||el.type==='range'?+el.value:el.value;state.cfg[k]=v;
+      const ro=$('#ro-'+k);if(ro){const map={minUp:fmtBytes,maxUp:fmtBytes,minDl:fmtBytes,maxDl:fmtBytes};
+        ro.textContent=map[k]?map[k](v)+'/s':(k==='jitterPct'?v+'%':k==='fontSize'||k==='refreshMs'?v+(k==='fontSize'?'px':' ms'):v);}
+      onCfg(k);};});
+}
+function onCfg(k){
+  if(k==='theme'){document.documentElement.dataset.theme=state.cfg.theme;}
+  if(k==='fontSize'){document.documentElement.style.setProperty('--fs',state.cfg.fontSize+'px');}
+  if(k==='scanlines')document.body.classList.toggle('scan',state.cfg.scanlines);
+  if(k==='reduceMotion')document.body.classList.toggle('reduce',state.cfg.reduceMotion);
+  if(k==='refreshMs')startTimers();
+  if(k==='minUp'&&state.cfg.minUp>state.cfg.maxUp){state.cfg.maxUp=state.cfg.minUp;}
+  if(k==='maxUp'&&state.cfg.maxUp<state.cfg.minUp){state.cfg.minUp=state.cfg.maxUp;}
+  if(k==='downloadPhase'){const w=$('#dlWarn');if(w)w.innerHTML=state.cfg.downloadPhase?'':'<div class="warnbox">⚠ Sans phase de download, les torrents apparaissent en seeder instantané — détectable sur tracker privé.</div>';}
+  if(k==='advancedMode')renderTab();
+  if(['numwant','port','client'].includes(k))updTrkSees();
+}
+function togglePause(){state.globalPause=!state.globalPause;
+  $('#gstate').classList.toggle('paused',state.globalPause);
+  $('#gstateLbl').textContent=state.globalPause?'En pause':'En marche';
+  $('#pauseBtn').textContent=state.globalPause?'▶ Reprendre':'⏸ Pause';
+  paintStatus();if(state.activeTab==='dashboard')paintDash();
+  const d=$('#dPauseAll');if(d)d.textContent=state.globalPause?'Reprendre':'Pause';}
+
+/* ============================ DOWNLOAD HELPER ============================ */
+function dl(name,content){const b=new Blob([content],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast('Export : '+name);}
+
+/* ============================ EVENTS / HOTKEYS ============================ */
+$$('.rail-item').forEach(b=>b.onclick=()=>setTab(b.dataset.go));
+$('#multUp').onclick=()=>bumpMult(1);$('#multDown').onclick=()=>bumpMult(-1);
+$('#addBtn').onclick=addModal;$('#helpBtn').onclick=shortcutsModal;$('#pauseBtn').onclick=togglePause;
+$('#hamb').onclick=openDrawer;$('#scrim').onclick=()=>{closeDrawer();closeModal();};
+document.addEventListener('click',e=>{ // bind dynamically-created cfg inputs in content
+  if(e.target.closest('#content')||e.target.closest('#drawerBody')){} });
+document.addEventListener('keydown',e=>{
+  if(/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName))return;
+  if(e.key==='ArrowUp'){bumpMult(1);e.preventDefault();}
+  else if(e.key==='ArrowDown'){bumpMult(-1);e.preventDefault();}
+  else if(e.key>='1'&&e.key<='9'){const tabs=['dashboard','torrents','trackers','speeds','client','schedule','network','logs','config'];setTab(tabs[+e.key-1]);}
+  else if(e.key==='t'||e.key==='T')addModal();
+  else if(e.key==='s'||e.key==='S')$('#drawer').classList.contains('on')?closeDrawer():openDrawer();
+  else if((e.key==='p'||e.key==='P'))togglePause();
+  else if(e.key==='?')shortcutsModal();
+  else if(e.key==='Escape'){closeModal();closeDrawer();}
+});
+// rebind cfg inputs whenever content re-renders
+const _renderTab=renderTab;renderTab=function(){_renderTab();bindCfgInputs($('#content'));};
+
+/* ============================ BOOT ============================ */
+state.now=0;
+document.documentElement.dataset.theme=state.cfg.theme;
+renderTab();paintStatus();startTimers();
+toast('Mockup chargé — données simulées');
+</script>
+
+</body>
+</html>
