@@ -10,6 +10,7 @@ use url::Url;
 
 use crate::CONFIG;
 use crate::torrent::Torrent;
+use crate::ui::{EventKind, emit};
 
 use super::tracker::Event;
 
@@ -267,6 +268,7 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
         Ok(addr) => addr,
         Err(e) => {
             error!("Cannot resolve UDP tracker {}: {}", url, e);
+            emit(EventKind::ConnectFail, &torrent.name, format!("resolve {url}: {e}"));
             torrent.error_count += 1;
             return;
         }
@@ -277,6 +279,7 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
         Ok(t) => t,
         Err(e) => {
             error!("Cannot connect to UDP tracker {}: {}", url, e);
+            emit(EventKind::ConnectFail, &torrent.name, format!("connect {url}: {e}"));
             torrent.error_count += 1;
             return;
         }
@@ -334,9 +337,28 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
                 response.leechers,
                 response.peers.len()
             );
+            emit(EventKind::ConnectOk, &torrent.name, "UDP connect OK");
+            emit(
+                EventKind::PeersUpdated,
+                &torrent.name,
+                format!(
+                    "S:{} L:{} peers:{}",
+                    response.seeders,
+                    response.leechers,
+                    response.peers.len()
+                ),
+            );
+            if uploaded > 0 {
+                emit(
+                    EventKind::UploadTick,
+                    &torrent.name,
+                    format!("+{}", crate::utils::format_bytes_u64(uploaded)),
+                );
+            }
         }
         Err(e) => {
             warn!("UDP announce failed for {}: {}", url, e);
+            emit(EventKind::Error, &torrent.name, format!("UDP fail {url}: {e}"));
             torrent.error_count += 1;
         }
     }

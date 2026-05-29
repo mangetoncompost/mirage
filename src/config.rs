@@ -185,14 +185,30 @@ pub async fn init_client(config: &Config) -> Option<u16> {
             );
         }
     }
+    // Work around a fake-torrent-client (0.9.11) bug: generate_key() builds a
+    // hex string but parses it as DECIMAL u32, which fails for any key with a-f,
+    // leaving client.key == 0. A constant key=0 is a detectable fingerprint on
+    // private trackers, so synthesize a real random non-zero key when that
+    // happens. See ensure_client_key().
+    ensure_client_key(&mut client);
     info!(
-        "Client {} (key: {}, peer ID:{})",
+        "Client {} (key: {:#010x}, peer ID:{})",
         client.name, client.key, client.peer_id
     );
     let key_interval = client.key_refresh_every;
     let mut guard = crate::CLIENT.write().await;
     *guard = Some(client);
     key_interval
+}
+
+/// Ensure the client carries a non-zero tracker key. fake-torrent-client's
+/// `generate_key()` can leave `key == 0` (it parses a hex string as decimal),
+/// and a constant zero key is a fingerprint. Generate a random non-zero u32.
+pub fn ensure_client_key(client: &mut fake_torrent_client::Client) {
+    if client.key == 0 {
+        // non-zero: 1..=u32::MAX
+        client.key = fastrand::u32(1..=u32::MAX);
+    }
 }
 
 #[cfg(test)]

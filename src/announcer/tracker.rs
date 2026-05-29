@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use crate::bencode::{BencodeDecoder, BencodeValue};
 use crate::torrent::Torrent;
+use crate::ui::{EventKind, emit};
 use crate::{CLIENT, CONFIG, TORRENTS};
 use fake_torrent_client::Client;
 use reqwest::Client as ReqwestClient;
@@ -38,6 +39,33 @@ pub enum Event {
     Stopped,
 }
 
+/// After a STARTED announce, a real client doesn't wait the tracker's full
+/// interval (often 30 min) before its first stats update — it reports progress
+/// fairly soon. We mirror that: once the STARTED response tells us the swarm has
+/// peers to "upload" to, schedule the *next* announce after a short randomized
+/// warm-up delay instead of the full interval, so fake upload starts promptly.
+/// The tracker's real interval is restored on that next announce. We never go
+/// below the tracker's `min interval` if it sent one.
+const WARMUP_MIN_SECS: u64 = 60;
+const WARMUP_MAX_SECS: u64 = 180;
+
+/// Clamp `t.interval` to a short warm-up window if the torrent can now upload,
+/// so the scheduler re-announces soon after STARTED. Returns the effective wait.
+pub fn apply_warmup(t: &mut Torrent) -> u64 {
+    if t.can_upload() {
+        let mut warmup = fastrand::u64(WARMUP_MIN_SECS..=WARMUP_MAX_SECS);
+        // Honor the tracker's minimum announce interval, if any.
+        if let Some(min) = t.min_interval {
+            warmup = warmup.max(min);
+        }
+        // Only shorten — never lengthen past what the tracker asked for.
+        if warmup < t.interval {
+            t.interval = warmup;
+        }
+    }
+    t.interval
+}
+
 pub async fn announce_started() -> u64 {
     info!("Announcing torrent(s) with STARTED event");
     let list = TORRENTS.read().await;
@@ -45,7 +73,8 @@ pub async fn announce_started() -> u64 {
     for m in list.iter() {
         let mut t = m.lock().await;
         announce(&mut t, Some(Event::Started)).await;
-        wait_time = wait_time.min(t.interval);
+        let wait = apply_warmup(&mut t);
+        wait_time = wait_time.min(wait);
         info!("Time: {}", wait_time);
     }
     wait_time
@@ -157,6 +186,18 @@ pub async fn announce(torrent: &mut Torrent, event: Option<Event>) {
             urls = torrent.urls.len(),
             "announcing with client"
         );
+        emit(
+            EventKind::AnnounceSent,
+            &torrent.name,
+            format!(
+                "{} url(s){}",
+                torrent.urls.len(),
+                match event {
+                    Some(e) => format!(" [{e:?}]"),
+                    None => String::new(),
+                }
+            ),
+        );
         for url in torrent.urls.clone() {
             debug!("\t{}", url);
             if url.to_lowercase().starts_with("udp://") {
@@ -253,7 +294,7 @@ async fn announce_http(
     let mut full_url = String::from(url);
     full_url.push(if full_url.contains('?') { '&' } else { '?' });
     full_url.push_str(&url_template);
-    let built_url = build_url(url, torrent, event, client.key.clone().to_string()).await;
+    let (built_url, uploaded) = build_url(url, torrent, event, client.key.clone().to_string()).await;
     info!("Announce HTTP URL {built_url}");
 
     let mut request_builder = reqwest_client.get(&built_url);
@@ -276,6 +317,8 @@ async fn announce_http(
                 Ok(b) => b,
                 Err(e) => {
                     error!("Failed to read response bytes: {:?}", e);
+                    emit(EventKind::Error, &torrent.name, format!("body read: {e}"));
+                    torrent.error_count += 1;
                     return torrent.interval; // return current interval
                 }
             };
@@ -300,6 +343,11 @@ async fn announce_http(
                             {
                                 // If present, then no other keys may be present. The value is a human-readable error message as to why the request failed
                                 error!("Cannot announce: {:?}", std::str::from_utf8(msg));
+                                emit(
+                                    EventKind::Error,
+                                    &torrent.name,
+                                    format!("tracker: {}", String::from_utf8_lossy(msg)),
+                                );
                                 torrent.error_count += 1;
                             } else {
                                 // Check for warning message (response still gets processed normally)
@@ -353,18 +401,50 @@ async fn announce_http(
 
                                 // b"peers" not handled
 
+                                // Accumulate the fake uploaded bytes we just
+                                // declared to the tracker (mirrors the UDP path,
+                                // which does the same on a successful announce).
+                                torrent.uploaded += uploaded;
+
                                 // Reset last_announce and error_count on successful response
                                 torrent.last_announce = std::time::Instant::now();
                                 torrent.error_count = 0;
+                                if uploaded > 0 {
+                                    emit(
+                                        EventKind::UploadTick,
+                                        &torrent.name,
+                                        format!("+{}", crate::utils::format_bytes_u64(uploaded)),
+                                    );
+                                }
+                                emit(
+                                    EventKind::PeersUpdated,
+                                    &torrent.name,
+                                    format!(
+                                        "S:{} L:{} int:{}s",
+                                        torrent.seeders, torrent.leechers, torrent.interval
+                                    ),
+                                );
                             }
                         }
-                        _ => error!("Response is not a dictionary"),
+                        _ => {
+                            error!("Response is not a dictionary");
+                            emit(EventKind::Error, &torrent.name, "not a dictionary");
+                            torrent.error_count += 1;
+                        }
                     }
                 }
-                Err(e) => error!("Bad response with HTTP status {status}: {:?}", e),
+                Err(e) => {
+                    error!("Bad response with HTTP status {status}: {:?}", e);
+                    emit(EventKind::Error, &torrent.name, format!("decode (HTTP {status})"));
+                    torrent.error_count += 1;
+                }
             }
         }
-        Err(err) => error!("Cannot announce: {:?}", err),
+        Err(err) => {
+            error!("Cannot announce: {:?}", err);
+            emit(EventKind::Error, &torrent.name, format!("HTTP fail: {err}"));
+            torrent.error_count += 1;
+        }
     }
     if let Some(min) = torrent.min_interval
         && min > torrent.interval
@@ -375,13 +455,15 @@ async fn announce_http(
 }
 
 /// Build the HTTP announce URLs for the listed trackers in the torrent file.
-/// It prepares the annonce query by replacing variables (port, numwant, ...) with the computed values
+/// It prepares the annonce query by replacing variables (port, numwant, ...) with the computed values.
+/// Returns the built URL and the `uploaded` byte count it declares to the tracker
+/// (so the caller can accumulate the same value into `torrent.uploaded`).
 pub async fn build_url(
     url: &str,
     torrent: &mut Torrent,
     event: Option<Event>,
     key: String,
-) -> String {
+) -> (String, u64) {
     info!("Torrent {:?}: {}", event, torrent.name);
     //compute downloads and uploads
     let elapsed: u64 = if event == Some(Event::Started) {
@@ -404,6 +486,27 @@ pub async fn build_url(
     let mut result = String::from(url);
     result.push(if result.contains('?') { '&' } else { '?' });
     result.push_str(&client.query);
+
+    // The `event` parameter must carry a real value (started/stopped/completed)
+    // or be OMITTED entirely. An empty `event=` is rejected by many trackers
+    // (e.g. Ubuntu's returns HTTP 400 "invalid event"), so for periodic
+    // announces (event = None) we strip the whole `event={event}` token rather
+    // than leaving it blank.
+    let result = match event {
+        Some(e) => result.replace(
+            "{event}",
+            match e {
+                Event::Started => "started",
+                // Event::Completed => "completed",
+                Event::Stopped => "stopped",
+            },
+        ),
+        None => result
+            .replace("&event={event}", "")
+            .replace("event={event}&", "")
+            .replace("event={event}", ""),
+    };
+
     let result = result
         .replace("{infohash}", &torrent.info_hash_urlencoded)
         .replace("{key}", &key)
@@ -413,18 +516,7 @@ pub async fn build_url(
         .replace("{port}", &port.to_string())
         .replace("{numwant}", &numwant.to_string())
         .replace("ipv6={ipv6}", "")
-        .replace("{left}", "0")
-        .replace(
-            "{event}",
-            match event {
-                Some(e) => match e {
-                    Event::Started => "started",
-                    // Event::Completed => "completed",
-                    Event::Stopped => "stopped",
-                },
-                None => "",
-            },
-        );
+        .replace("{left}", "0");
     // info!(
     //     "\tUploaded: {}",
     //     byte_unit::Byte::from_u128(uploaded as u128)
@@ -433,12 +525,54 @@ pub async fn build_url(
     //         .to_string()
     // );
     info!("\tAnnonce at: {}", url);
-    result
+    (result, uploaded)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reproduces the `{event}` substitution rule build_url applies, on the real
+    /// query template shipped by fake-torrent-client. A periodic announce
+    /// (event = None) must NOT leave an empty `event=` (trackers reject it);
+    /// it must be omitted entirely.
+    fn substitute_event(query: &str, event: Option<Event>) -> String {
+        match event {
+            Some(e) => query.replace(
+                "{event}",
+                match e {
+                    Event::Started => "started",
+                    Event::Stopped => "stopped",
+                },
+            ),
+            None => query
+                .replace("&event={event}", "")
+                .replace("event={event}&", "")
+                .replace("event={event}", ""),
+        }
+    }
+
+    #[test]
+    fn test_event_param_omitted_when_none() {
+        // The exact template fake-torrent-client uses (event in the middle).
+        let q = "uploaded={uploaded}&key={key}&event={event}&numwant={numwant}&compact=1";
+        let started = substitute_event(q, Some(Event::Started));
+        assert!(started.contains("event=started"), "started: {started}");
+
+        let periodic = substitute_event(q, None);
+        // No empty event= must remain, and the rest of the query stays intact.
+        assert!(!periodic.contains("event="), "must omit event=: {periodic}");
+        assert!(periodic.contains("key={key}&numwant={numwant}"), "{periodic}");
+
+        // event at the very end of the query.
+        let q_end = "uploaded={uploaded}&numwant={numwant}&event={event}";
+        let periodic_end = substitute_event(q_end, None);
+        assert!(!periodic_end.contains("event="), "{periodic_end}");
+        assert!(periodic_end.ends_with("numwant={numwant}"), "{periodic_end}");
+
+        let stopped = substitute_event(q, Some(Event::Stopped));
+        assert!(stopped.contains("event=stopped"), "{stopped}");
+    }
 
     #[test]
     pub fn test_supported_url() {
