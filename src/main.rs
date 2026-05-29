@@ -17,6 +17,7 @@ mod config;
 mod directory;
 pub mod json_output;
 pub mod torrent;
+mod ui;
 mod utils;
 mod watcher;
 
@@ -29,6 +30,8 @@ async fn run_key_renewer(refresh_every: u16) {
     loop {
         if let Some(client) = &mut *CLIENT.write().await {
             client.generate_key();
+            // generate_key() can leave key == 0 (lib bug); keep it non-zero.
+            config::ensure_client_key(client);
         }
         // std::thread::sleep(Duration::from_secs(u64::from(refresh_every)));
         tokio::time::sleep(Duration::from_secs(u64::from(refresh_every))).await;
@@ -79,15 +82,26 @@ async fn main() {
         "debug" => tracing::Level::DEBUG,
         _       => tracing::Level::TRACE,
     };
-    tracing_subscriber::fmt()
-        .with_max_level(level)
-        .with_level(true)
-        .with_target(true)
-        .with_file(true)
-        .with_line_number(true)
-        .with_thread_ids(true)
-        .with_thread_names(true)
-        .init();
+    // Live dashboard on an interactive TTY; classic tracing logs otherwise.
+    // In TUI mode we deliberately do NOT init the fmt subscriber so the tracing
+    // macros become no-ops and cannot corrupt the alternate screen — the event
+    // ring carries the signal in-UI instead.
+    let tui = ui::should_use_tui();
+    let _term_guard = if tui {
+        ui::install_panic_hook(); // BEFORE enter()
+        Some(ui::draw::TermGuard::enter())
+    } else {
+        tracing_subscriber::fmt()
+            .with_max_level(level)
+            .with_level(true)
+            .with_target(true)
+            .with_file(true)
+            .with_line_number(true)
+            .with_thread_ids(true)
+            .with_thread_names(true)
+            .init();
+        None
+    };
 
     // get config path if possible
     let mut config_path: Option<PathBuf> = parse_cli_args();
@@ -143,9 +157,20 @@ async fn main() {
         watcher::watch_directory(watch_dir).await;
     });
 
+    // Live dashboard render task (TTY only) + shutdown signal it listens on.
+    let (sd_tx, sd_rx) = tokio::sync::watch::channel(false);
+    if tui {
+        tokio::spawn(ui::run(sd_rx));
+    }
+
     tokio::spawn(async move {
         // graceful exit when Ctrl + C / SIGINT
         tokio::signal::ctrl_c().await.unwrap();
+        // Tear down the dashboard first so logs/exit messages land on the real
+        // screen. exit(0) skips Drop, so restore() must be called explicitly;
+        // it is idempotent and safe even if the TUI never started.
+        let _ = sd_tx.send(true);
+        ui::draw::restore();
         info!("Exiting...");
         announcer::tracker::announce_stopped().await;
         if config.use_pid_file && pid_file.is_some() {

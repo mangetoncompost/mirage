@@ -29,3 +29,6 @@ sha1_smol = "1.0"
 
 # file watching
 notify = "8.0"
+
+# live terminal UI (super-shell dashboard)
+crossterm = "0.28"

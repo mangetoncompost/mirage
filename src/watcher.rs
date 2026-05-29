@@ -8,6 +8,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::announcer::tracker::{Event, announce};
 use crate::torrent::Torrent;
+use crate::ui::{EventKind as UiEventKind, emit};
 use crate::utils::format_bytes_u64;
 use crate::{CLIENT, TORRENTS};
 
@@ -153,9 +154,17 @@ async fn handle_file_added(path: PathBuf) {
             let mut t = m.lock().await;
             if t.info_hash_urlencoded == info_hash {
                 announce(&mut t, Some(Event::Started)).await;
+                // Warm-up: re-announce soon so fake upload starts promptly
+                // instead of waiting the tracker's full interval.
+                crate::announcer::tracker::apply_warmup(&mut t);
                 info!(
                     "Added and announced torrent: {} (interval: {}s)",
                     name, t.interval
+                );
+                emit(
+                    UiEventKind::Added,
+                    &name,
+                    format!("added (interval {}s)", t.interval),
                 );
                 break;
             }
@@ -234,6 +243,11 @@ async fn handle_file_removed(path: PathBuf) {
                 seeders,
                 leechers,
                 errors
+            );
+            emit(
+                UiEventKind::Removed,
+                &name,
+                format!("removed, up {}", format_bytes_u64(uploaded)),
             );
         }
     } else {

@@ -2,3 +2,4 @@ target/
 *.torrent
 /torrents/*.torrent
 .env.local
+.claude/
