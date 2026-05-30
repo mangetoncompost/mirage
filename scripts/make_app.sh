@@ -46,12 +46,23 @@ fi
 
 # Open a Terminal window running RatioUp in that dir. `exec` makes RatioUp the
 # controlling process, so closing the window delivers SIGHUP and RatioUp shuts
-# down cleanly (announce stopped + state saved + terminal restored). Quote both
-# paths to tolerate spaces.
+# down cleanly (announce stopped + state saved + terminal restored).
+#
+# If Terminal is launched fresh, it auto-opens one empty window — running
+# `do script` then would leave TWO windows (the empty one + ours). So we detect
+# whether Terminal was already running: if not, reuse the window the activation
+# just created (`do script ... in window 1`); if yes, open a new window. Both
+# branches return the tab so we can set its title/size. Quote both paths.
 osascript <<APPLESCRIPT
 tell application "Terminal"
+    set wasRunning to running
     activate
-    do script "clear; cd '$WORKDIR'; exec '$BIN'"
+    if wasRunning then
+        do script "clear; cd '$WORKDIR'; exec '$BIN'"
+    else
+        -- reuse the empty window Terminal just opened on launch
+        do script "clear; cd '$WORKDIR'; exec '$BIN'" in window 1
+    end if
     set custom title of front window to "RatioUp"
     set number of columns of front window to 110
     set number of rows of front window to 34
