@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/mangetoncompost/mirage)](https://github.com/mangetoncompost/mirage/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
-[![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos-lightgrey)](https://github.com/mangetoncompost/mirage)
+[![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey)](https://github.com/mangetoncompost/mirage)
 
 ![Mirage dashboard demo](assets/demo.gif)
 
@@ -120,6 +120,7 @@ Pre-compiled binaries for Linux and macOS are available on the
 | `mirage-linux-x86_64` | Linux x86_64 (static, no dependencies) |
 | `mirage-macos-aarch64` | macOS Apple Silicon |
 | `mirage-macos-x86_64` | macOS Intel |
+| `mirage-windows-x86_64.exe` | Windows x86_64 |
 | `Mirage.app.zip` | macOS app bundle (double-click to launch) |
 
 On Linux and macOS, make the binary executable after downloading:

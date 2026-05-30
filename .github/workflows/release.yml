@@ -71,6 +71,30 @@ jobs:
           name: mirage-${{ matrix.suffix }}
           path: mirage-${{ matrix.suffix }}
 
+  build-windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Rename binary
+        run: cp target/release/mirage.exe mirage-windows-x86_64.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mirage-windows-x86_64.exe
+          path: mirage-windows-x86_64.exe
+
   build-macos-app:
     name: macOS .app bundle
     runs-on: macos-latest
@@ -107,7 +131,7 @@ jobs:
 
   release:
     name: Publish Release
-    needs: [build-linux, build-macos, build-macos-app]
+    needs: [build-linux, build-macos, build-windows, build-macos-app]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -130,4 +154,5 @@ jobs:
             mirage-linux-x86_64
             mirage-macos-aarch64
             mirage-macos-x86_64
+            mirage-windows-x86_64.exe
             Mirage.app.zip
