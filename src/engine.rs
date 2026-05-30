@@ -105,9 +105,9 @@ async fn announce_then_remove(hash: [u8; 20]) {
     let mut list = crate::TORRENTS.write().await;
     list.retain(|m| {
         if let Ok(t) = m.try_lock() {
-            t.info_hash != hash
+            t.info_hash != hash // drop the target; keep everything else
         } else {
-            false // STOPPED already sent above; safe to drop even if mid-announce
+            true // can't acquire lock → not the target (target was locked above); keep it
         }
     });
     info!("torrent removed");
@@ -213,31 +213,52 @@ async fn export_snapshot() {
     json.push_str(&total_up.to_string());
     json.push('}');
 
+    // Resolve the export directory: XDG state dir (same as state.json) on Unix,
+    // falling back to the torrent_dir. Never write to cwd — that breaks when
+    // launched from Mirage.app (cwd = $HOME, fine) but is surprising otherwise.
+    #[cfg(unix)]
+    let export_dir = xdg::BaseDirectories::with_prefix("Mirage")
+        .get_state_home()
+        .unwrap_or_else(|| crate::CONFIG.load().torrent_dir.clone());
+    #[cfg(not(unix))]
+    let export_dir = crate::CONFIG.load().torrent_dir.clone();
+
+    if let Err(e) = tokio::fs::create_dir_all(&export_dir).await {
+        tracing::warn!("ExportSnapshot: mkdir {}: {e}", export_dir.display());
+    }
+
     let now_str = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
-    let filename = format!("mirage-{now_str}.json");
-    let tmp = format!("{filename}.tmp");
+    let filename = export_dir.join(format!("mirage-{now_str}.json"));
+    let tmp = filename.with_extension("json.tmp");
+
     let written = if let Err(e) = tokio::fs::write(&tmp, json.as_bytes()).await {
-        tracing::warn!("ExportSnapshot: write {tmp}: {e}");
+        tracing::warn!("ExportSnapshot: write {}: {e}", tmp.display());
         false
     } else {
         match tokio::fs::rename(&tmp, &filename).await {
             Ok(()) => true,
             Err(e) => {
-                tracing::warn!("ExportSnapshot: rename {tmp} → {filename}: {e}");
+                tracing::warn!(
+                    "ExportSnapshot: rename {} → {}: {e}",
+                    tmp.display(),
+                    filename.display()
+                );
+                // Clean up the orphaned .tmp so it does not accumulate on disk.
+                let _ = tokio::fs::remove_file(&tmp).await;
                 false
             }
         }
     };
 
     if written {
-        let b64 = crate::utils::base64_encode(filename.as_bytes());
+        let b64 = crate::utils::base64_encode(filename.to_string_lossy().as_bytes());
         crate::ui::draw::queue_clipboard(b64);
         crate::ui::emit(
             crate::ui::EventKind::Exported,
             "export",
-            format!("→ {filename}"),
+            format!("→ {}", filename.display()),
         );
-        info!("snapshot exported to {filename}");
+        info!("snapshot exported to {}", filename.display());
     } else {
         crate::ui::emit(
             crate::ui::EventKind::Error,

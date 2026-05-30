@@ -165,7 +165,7 @@ pub fn check_milestone(total_up: u64, total_len: u64, tick: u64) -> bool {
     if total_len == 0 {
         return false;
     }
-    let ratio_tenths = (total_up * 10) / total_len;
+    let ratio_tenths = ((total_up as u128 * 10) / total_len as u128).min(u64::MAX as u128) as u64;
     let crossed = MILESTONES_TENTHS
         .iter()
         .rev()

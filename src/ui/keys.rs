@@ -49,7 +49,7 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                 // to the palette buffer BEFORE the normal keymap.
                 if overlay::palette_open() {
                     match (code, modifiers) {
-                        (KeyCode::Esc, _) | (KeyCode::Char('q'), _) => {
+                        (KeyCode::Esc, _) => {
                             overlay::close_palette();
                         }
                         (KeyCode::Backspace, _) => {
@@ -178,11 +178,22 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                                 "—",
                                 "torrent busy (announcing) — try again",
                             );
+                        } else if !targets.is_empty() {
+                            let n = targets.len();
+                            for h in targets {
+                                control::send(Cmd::Remove(h));
+                            }
+                            view::clear_marks();
+                            crate::ui::emit(
+                                crate::ui::EventKind::Removed,
+                                "—",
+                                if n == 1 {
+                                    "removing 1 torrent…".to_string()
+                                } else {
+                                    format!("removing {n} torrents…")
+                                },
+                            );
                         }
-                        for h in targets {
-                            control::send(Cmd::Remove(h));
-                        }
-                        view::clear_marks();
                     }
                     (KeyCode::Char('k'), _) if active == View::Client => {
                         control::send(Cmd::ReinitClient);

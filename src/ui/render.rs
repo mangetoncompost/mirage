@@ -522,11 +522,35 @@ pub fn build_frame(
         let avail = inner.saturating_sub(2);
         let used = dwidth(&plain);
         let mut vis = used;
-        if used + 3 + hint_vis <= avail {
-            let gap = avail - used - hint_vis;
-            txt.push_str(&" ".repeat(gap));
-            txt.push_str(&hint); // already contains color escapes
-            vis = avail;
+        if f.celebrate && f.spinner.is_multiple_of(2) {
+            // Celebration hint: already colored, use as-is if it fits.
+            if used + 3 + hint_vis <= avail {
+                let gap = avail - used - hint_vis;
+                txt.push_str(&" ".repeat(gap));
+                txt.push_str(&hint);
+                vis = avail;
+            }
+        } else {
+            // Static hint: try progressively shorter versions so at least "? q"
+            // stays visible instead of being suppressed entirely at narrow widths.
+            let fallbacks: &[(&str, bool)] = &[
+                ("←→ tabs · : cmds · ? help · q quit", false),
+                (": cmds · ? help · q quit", false),
+                ("? help · q quit", false),
+                ("? q", false),
+            ];
+            for &(candidate, _) in fallbacks {
+                let cv = dwidth(candidate);
+                if used + 3 + cv <= avail {
+                    let gap = avail - used - cv;
+                    txt.push_str(&" ".repeat(gap));
+                    txt.push_str(&c_dim(&c));
+                    txt.push_str(candidate);
+                    txt.push_str(c.reset());
+                    vis = avail;
+                    break;
+                }
+            }
         }
         line(&mut out, &txt, vis.min(avail));
     }
@@ -1839,14 +1863,21 @@ fn build_detail(
     let tv = hash.and_then(|h| f.rows.iter().find(|r| r.info_hash == h));
     match tv {
         None => {
+            // Distinguish: no hash stored vs hash present but torrent is busy/removed.
+            let msg = if hash.is_some() {
+                " torrent announcing — detail will reappear momentarily"
+            } else {
+                " (no torrent selected — press Enter on a row)"
+            };
             line(
                 out,
-                &format!(
-                    "{d} (no torrent selected — press Enter on a row){r}",
-                    d = c_dim(c),
-                    r = c.reset()
-                ),
-                dwidth(" (no torrent selected — press Enter on a row)"),
+                &format!("{d}{msg}{r}", d = c_dim(c), r = c.reset()),
+                dwidth(msg),
+            );
+            line(
+                out,
+                &format!("{d} Esc to close{r}", d = c_dim(c), r = c.reset()),
+                dwidth(" Esc to close"),
             );
         }
         Some(tv) => {
@@ -1922,6 +1953,16 @@ fn build_detail(
                     );
                 }
             }
+            // Navigation hint — always visible at the bottom of the card.
+            line(
+                out,
+                &format!(
+                    "{d} Esc close · i info · w wire{r}",
+                    d = c_dim(c),
+                    r = c.reset()
+                ),
+                dwidth(" Esc close · i info · w wire"),
+            );
         }
     }
 }
