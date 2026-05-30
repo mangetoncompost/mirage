@@ -15,7 +15,6 @@ const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
 
 // --- spinner ----------------------------------------------------------------
-const SPINNER_U: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_A: [&str; 4] = ["|", "/", "-", "\\"];
 
 /// Terminal capabilities, resolved once per frame from the environment.
@@ -220,15 +219,17 @@ fn box_set(utf8: bool) -> Box {
     }
 }
 
-/// How many feed lines fit after header + table + footer.
+/// How many feed lines fit on the dashboard after everything else, so the feed
+/// pane (padded with blanks) makes the box fill the window exactly.
 pub fn feed_capacity(term_h: u16, n_rows: usize, max_visible_rows: usize) -> usize {
-    // header: top border + title + client + sep        = 4
-    // table:  column header + visible rows             = 1 + min(n_rows, cap)
-    // feed:   "recent" separator + lines + ...
-    // footer: separator + totals + bottom border       = 3
+    // header: top border + tab strip + sep + client + sep   = 5
+    // table:  column header + visible rows + selected-progress
+    // feed:   "recent" separator + lines …
+    // footer: separator + totals + bottom border            = 3
     let shown_rows = n_rows.min(max_visible_rows) + if n_rows > max_visible_rows { 1 } else { 0 };
-    let fixed = 4 + (1 + shown_rows) + 1 /* feed sep */ + 3;
-    (term_h as usize).saturating_sub(fixed).min(50)
+    let selected_progress = if n_rows > 0 { 1 } else { 0 };
+    let fixed = 5 + (1 + shown_rows + selected_progress) + 1 /* feed sep */ + 3;
+    (term_h as usize).saturating_sub(fixed).min(60)
 }
 
 /// Maximum torrent rows we draw before collapsing the rest into "(+N more)".
@@ -300,11 +301,9 @@ pub fn build_frame(f: &Frame, width: u16, view: View, sel: usize) -> String {
     };
 
     // ---- header -------------------------------------------------------------
-    let spin = if c.utf8 {
-        SPINNER_U[f.spinner % SPINNER_U.len()]
-    } else {
-        SPINNER_A[f.spinner % SPINNER_A.len()]
-    };
+    // ASCII spinner everywhere: braille (⠋⠙…) is absent from most monospace
+    // fonts (incl. the bundled JetBrains Mono), where it renders as a tofu □.
+    let spin = SPINNER_A[f.spinner % SPINNER_A.len()];
     let uptime = fmt_hms((f.now - f.started).num_seconds().max(0) as u64);
     // top border with title on the left and spinner+uptime on the right:
     //   ┌─ RatioUp ───────────────────── ⠹ 02:14:07 ─┐
@@ -585,6 +584,11 @@ fn build_dash(
     for ev in f.feed.iter() {
         let (content, vis) = render_event_row(ev, c, inner);
         line(out, &content, vis);
+    }
+    // Pad the pane with blank rows so the footer bottom-anchors to the window
+    // (no empty terminal rows below the board when there are few events).
+    for _ in f.feed.len()..f.feed_cap {
+        line(out, "", 0);
     }
 }
 
