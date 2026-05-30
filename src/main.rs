@@ -20,7 +20,6 @@ mod config;
 mod control;
 mod directory;
 mod engine;
-mod gui;
 pub mod json_output;
 mod state;
 pub mod torrent;
@@ -30,8 +29,9 @@ mod utils;
 mod watcher;
 
 static STARTED: OnceCell<chrono::DateTime<chrono::Utc>> = OnceCell::const_new();
-/// Live, lock-free swappable config: the native GUI can edit it at runtime and
-/// the announce hot path reads it with `CONFIG.load()`. Defaults until set in main.
+/// Live, lock-free swappable config: the dashboard's Speeds editor can change it
+/// at runtime and the announce hot path reads it with `CONFIG.load()`. Defaults
+/// until set in main.
 static CONFIG: Lazy<ArcSwap<Config>> = Lazy::new(|| ArcSwap::from_pointee(Config::default()));
 static CLIENT: RwLock<Option<Client>> = RwLock::const_new(None);
 static TORRENTS: RwLock<Vec<Mutex<Torrent>>> = RwLock::const_new(Vec::new()); // TODO: replace with mutex
@@ -62,8 +62,6 @@ pub(crate) fn parse_cli_args() -> Option<PathBuf> {
                     tracing::error!("Missing value for -c/--config");
                 }
             }
-            // GUI / TTY flags are handled in main(); ignore them here silently.
-            "--gui" | "--tty" => {}
             // Handle other arguments or positional arguments here
             other_arg => {
                 tracing::error!("Warning: Unknown argument: {}, Ignoring", other_arg);
@@ -82,30 +80,11 @@ pub(crate) fn get_config_from_xdg() -> Option<PathBuf> {
     None
 }
 
-/// Entry point. The native GUI window (`--gui` or .app double-click) is a REAL
-/// embedded terminal that PTY-spawns THIS binary again with `--tty`; that child
-/// must take the CLI/TTY path even though it lives in the bundle, so `--tty`
-/// forces `run_cli()` and overrides the GUI/bundle detection (no recursion).
-fn main() {
-    let force_tty = std::env::args().any(|a| a == "--tty");
-    let want_gui = !force_tty && (std::env::args().any(|a| a == "--gui") || launched_from_bundle());
-    if want_gui {
-        gui::run();
-    } else {
-        run_cli();
-    }
-}
-
-/// True when the executable lives inside an .app bundle (…/Contents/MacOS/).
-fn launched_from_bundle() -> bool {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.ends_with("Contents/MacOS")))
-        .unwrap_or(false)
-}
-
+/// Entry point: the live super-shell dashboard on an interactive terminal, else
+/// classic `tracing` logs (see `ui::should_use_tui`). The macOS RatioUp.app
+/// (scripts/make_app.sh) just opens this in Terminal.app.
 #[tokio::main]
-async fn run_cli() {
+async fn main() {
     //configure logger
     let log_level = std::env::var("RUST_LOG")
         .unwrap_or_else(|_| "trace".to_string());
@@ -211,8 +190,23 @@ async fn run_cli() {
     }
 
     tokio::spawn(async move {
-        // Graceful exit on Ctrl+C: real SIGINT (non-TTY, or external `kill -INT`)
-        // OR the q / Ctrl+C-as-key the dashboard reads under raw mode.
+        // Graceful exit on Ctrl+C (SIGINT, or the q / Ctrl+C-as-key the dashboard
+        // reads under raw mode), AND on SIGTERM (`kill`) / SIGHUP (the Terminal
+        // window is closed) — so closing the RatioUp.app window still restores
+        // the terminal, announces STOPPED and saves state.
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler");
+            let mut sighup = signal(SignalKind::hangup()).expect("SIGHUP handler");
+            tokio::select! {
+                r = tokio::signal::ctrl_c() => { let _ = r; }
+                _ = sigterm.recv() => {}
+                _ = sighup.recv() => {}
+                _ = key_rx.recv() => {}
+            }
+        }
+        #[cfg(not(unix))]
         tokio::select! {
             r = tokio::signal::ctrl_c() => { let _ = r; }
             _ = key_rx.recv() => {}

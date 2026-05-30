@@ -247,6 +247,27 @@ const TAB_LABELS: [&str; 9] = [
 pub fn build_frame(f: &Frame, width: u16, view: View, sel: usize) -> String {
     let c = Caps::detect();
     let b = box_set(c.utf8);
+
+    // Too-small terminal: don't run the layout math on a degenerate size — show
+    // a single centered hint instead of a broken, clipped box.
+    if (width as usize) < 40 || f.term_h < 8 {
+        let msg = "terminal too small (need 40x8)";
+        let mut s = String::new();
+        let pad_top = f.term_h / 2;
+        for _ in 0..pad_top {
+            s.push_str(CLR_EOL);
+            s.push_str("\r\n");
+        }
+        let lpad = (width as usize).saturating_sub(msg.chars().count()) / 2;
+        s.push_str(&" ".repeat(lpad));
+        s.push_str(&c_warn(&c));
+        s.push_str(msg);
+        s.push_str(c.reset());
+        s.push_str(CLR_EOL);
+        s.push_str(CLR_BELOW);
+        return s;
+    }
+
     let w = width.max(20) as usize;
     let inner = w.saturating_sub(2); // space between the two vertical borders
 
@@ -389,18 +410,23 @@ pub fn build_frame(f: &Frame, width: u16, view: View, sel: usize) -> String {
     }
 
     // ---- view body ----------------------------------------------------------
-    // Each builder emits its rows through the shared `line`/`rule` helpers so
-    // every view keeps identical width/box/color discipline.
-    match view {
-        View::Dashboard => build_dash(&mut out, f, &c, &b, inner, sel, &line, &rule),
-        View::Torrents => build_tor(&mut out, f, &c, &b, inner, sel, &line, &rule),
-        View::Trackers => build_trk(&mut out, f, &c, inner, sel, &line),
-        View::Speeds => build_spd(&mut out, f, &c, &b, inner, sel, &line, &rule),
-        View::Client => build_cli(&mut out, f, &c, &b, inner, &line, &rule),
-        View::Schedule => build_sch(&mut out, f, &c, inner, &line),
-        View::Network => build_net(&c, inner, &mut out, &line),
-        View::Logs => build_log(&mut out, f, &c, inner, &line),
-        View::Config => build_cfg(&c, &b, inner, &mut out, &line, &rule),
+    // The `?` help overlay replaces the body on any tab. Otherwise each builder
+    // emits its rows through the shared `line`/`rule` helpers so every view keeps
+    // identical width/box/color discipline.
+    if crate::ui::view::help_open() {
+        build_help(&mut out, &c, inner, &line);
+    } else {
+        match view {
+            View::Dashboard => build_dash(&mut out, f, &c, &b, inner, sel, &line, &rule),
+            View::Torrents => build_tor(&mut out, f, &c, &b, inner, sel, &line, &rule),
+            View::Trackers => build_trk(&mut out, f, &c, inner, sel, &line),
+            View::Speeds => build_spd(&mut out, f, &c, &b, inner, sel, &line, &rule),
+            View::Client => build_cli(&mut out, f, &c, &b, inner, &line, &rule),
+            View::Schedule => build_sch(&mut out, f, &c, inner, &line),
+            View::Network => build_net(&c, inner, &mut out, &line),
+            View::Logs => build_log(&mut out, f, &c, inner, &line),
+            View::Config => build_cfg(&c, &b, inner, &mut out, &line, &rule),
+        }
     }
 
     // ---- fill to the window bottom ------------------------------------------
@@ -454,7 +480,7 @@ pub fn build_frame(f: &Frame, width: u16, view: View, sel: usize) -> String {
             err = err_span,
         );
         // Right-aligned key hint when the line has room for it.
-        let hint = "←→ tabs · q quit";
+        let hint = "←→ tabs · ? help · q quit";
         let avail = inner.saturating_sub(2);
         let used = dwidth(&plain);
         let mut vis = used;
@@ -609,6 +635,38 @@ fn build_dash(
         line(out, &content, vis);
     }
     let _ = f.feed_cap;
+}
+
+// ---- ? : help overlay (full keymap) ---------------------------------------
+fn build_help(out: &mut String, c: &Caps, inner: usize, line: &Line) {
+    let head = |out: &mut String, t: &str| {
+        line(out, &format!("{cy} {t}{r}", cy = c_header(c), t = t, r = c.reset()), dwidth(t) + 1);
+    };
+    let row = |out: &mut String, key: &str, desc: &str| {
+        let txt = format!("   {cy}{key:<10}{r}{d}{desc}{r}", cy = c_header(c), key = key, r = c.reset(), d = c_dim(c), desc = desc);
+        line(out, &txt, (3 + 10 + dwidth(desc)).min(inner.saturating_sub(2)));
+    };
+    line(out, "", 0);
+    head(out, "navigation");
+    row(out, "1-9", "jump to tab");
+    row(out, "← →", "previous / next tab");
+    row(out, "↑ ↓", "select row (or upload multiplier off the lists)");
+    row(out, "Esc", "back to dashboard (or close this help)");
+    line(out, "", 0);
+    head(out, "actions");
+    row(out, "p", "pause / resume all uploads (global)");
+    row(out, "r", "resume all uploads");
+    row(out, "f", "force announce the selected torrent");
+    row(out, "x", "remove the selected torrent (announces stopped)");
+    row(out, "+ -", "edit the selected setting on the Speeds tab");
+    line(out, "", 0);
+    head(out, "tabs");
+    row(out, "k", "[cli] re-init the emulated client (new key)");
+    row(out, "s", "[cfg] save config.toml");
+    line(out, "", 0);
+    head(out, "session");
+    row(out, "?", "toggle this help");
+    row(out, "q / ^C", "quit (announces stopped, saves state)");
 }
 
 /// Emit a list row with the `SEL_GUTTER`-cell selection gutter at the left:

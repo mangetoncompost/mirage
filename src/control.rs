@@ -52,10 +52,6 @@ pub enum Cmd {
     Remove([u8; 20]),
     /// Force the next announce for a torrent (resets its countdown).
     ForceAnnounce([u8; 20]),
-    /// Pause a single torrent.
-    PauseTorrent([u8; 20]),
-    /// Resume a single torrent.
-    ResumeTorrent([u8; 20]),
     /// Re-init the emulated client (after a client-profile change).
     ReinitClient,
     /// Persist the current config to config.toml.
