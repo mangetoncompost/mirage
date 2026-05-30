@@ -87,42 +87,38 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                     // Force announce / remove act on the selected row of a list
                     // view (Dashboard/Torrents/Trackers); selected_hash skips the
                     // busy sentinel.
-                    (KeyCode::Char('f'), _)
-                        if is_list_view(active) => {
-                            match view::selected_hash() {
-                                Some(h) => control::send(Cmd::ForceAnnounce(h)),
-                                None if view::row_count() > 0 => {
-                                    crate::ui::emit(
-                                        crate::ui::EventKind::Error,
-                                        "—",
-                                        "torrent busy (announcing) — try again",
-                                    );
-                                }
-                                None => {}
+                    (KeyCode::Char('f'), _) if is_list_view(active) => {
+                        match view::selected_hash() {
+                            Some(h) => control::send(Cmd::ForceAnnounce(h)),
+                            None if view::row_count() > 0 => {
+                                crate::ui::emit(
+                                    crate::ui::EventKind::Error,
+                                    "—",
+                                    "torrent busy (announcing) — try again",
+                                );
                             }
+                            None => {}
                         }
-                    (KeyCode::Char('x'), _)
-                        if is_list_view(active) => {
-                            match view::selected_hash() {
-                                Some(h) => control::send(Cmd::Remove(h)),
-                                None if view::row_count() > 0 => {
-                                    crate::ui::emit(
-                                        crate::ui::EventKind::Error,
-                                        "—",
-                                        "torrent busy (announcing) — try again",
-                                    );
-                                }
-                                None => {}
+                    }
+                    (KeyCode::Char('x'), _) if is_list_view(active) => {
+                        match view::selected_hash() {
+                            Some(h) => control::send(Cmd::Remove(h)),
+                            None if view::row_count() > 0 => {
+                                crate::ui::emit(
+                                    crate::ui::EventKind::Error,
+                                    "—",
+                                    "torrent busy (announcing) — try again",
+                                );
                             }
+                            None => {}
                         }
-                    (KeyCode::Char('k'), _)
-                        if active == View::Client => {
-                            control::send(Cmd::ReinitClient);
-                        }
-                    (KeyCode::Char('s'), _)
-                        if active == View::Config => {
-                            control::send(Cmd::SaveConfig);
-                        }
+                    }
+                    (KeyCode::Char('k'), _) if active == View::Client => {
+                        control::send(Cmd::ReinitClient);
+                    }
+                    (KeyCode::Char('s'), _) if active == View::Config => {
+                        control::send(Cmd::SaveConfig);
+                    }
                     // Esc closes the help overlay, else returns to the Dashboard.
                     (KeyCode::Esc, _) => {
                         if view::help_open() {
