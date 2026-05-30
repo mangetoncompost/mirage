@@ -54,6 +54,8 @@ than re-downloading from scratch, which would itself be detectable.
 
 ### Upload speed curve
 
+![Upload speed curve](assets/speed-curve.svg)
+
 Upload speed is modelled as a sum of four sinusoidal components:
 
 - A slow mean-drift oscillation (period ~1200 s)
@@ -437,6 +439,10 @@ assets/
 tests/
   *.torrent            Real .torrent files used by the test suite
 ```
+
+## Star history
+
+[![Star History Chart](https://api.star-history.com/svg?repos=mangetoncompost/mirage&type=Date&theme=dark)](https://star-history.com/#mangetoncompost/mirage&Date)
 
 ## Contributing
 
