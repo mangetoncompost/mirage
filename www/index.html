@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RatioUp Stats</title>
+    <title>Mirage Stats</title>
     <style>
         :root {
             --bg-primary: #ffffff;
@@ -331,7 +331,7 @@
             <div class="header-content">
                 <div class="logo">
                     <span class="logo-emoji">📈</span>
-                    <h1>RatioUp</h1>
+                    <h1>Mirage</h1>
                 </div>
                 <div class="header-stats">
                     <div class="stat-item">
@@ -402,7 +402,7 @@
     </main>
 
     <footer>
-        <p>📈 RatioUp Stats Dashboard | <a href="https://github.com/slundi/RatioUp" target="_blank">GitHub</a> | <a href="https://codeberg.org/slundi/RatioUp" target="_blank">Codeberg</a></p>
+        <p>📈 Mirage Stats Dashboard</p>
     </footer>
 
     <script>
@@ -576,7 +576,7 @@
         async function fetchStats() {
             try {
                 // Try to fetch stats.json from the same directory
-                const response = await fetch('RatioUp.json?' + Date.now());
+                const response = await fetch('mirage.json?' + Date.now());
                 if (!response.ok) {
                     throw new Error('Failed to load stats');
                 }
