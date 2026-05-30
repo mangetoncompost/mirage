@@ -85,11 +85,13 @@ impl eframe::App for RatioUpApp {
         self.handle_keys(ui.ctx());
 
         egui::Panel::bottom("repl").show_inside(ui, |ui| self.repl(ui));
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                views::render(self, ui);
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(theme::BG).inner_margin(egui::Margin::same(6)))
+            .show_inside(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    views::render(self, ui);
+                });
             });
-        });
     }
 }
 

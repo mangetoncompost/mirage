@@ -3,7 +3,7 @@
 //! we reproduce the pure-shell mockup (box-drawing borders, aligned columns,
 //! `[####----]` bars) inside a native window — no default egui widgets.
 
-use egui::{Color32, RichText};
+use egui::Color32;
 
 use super::theme;
 
@@ -76,6 +76,15 @@ impl Screen {
         }
         l.push(right.to_string(), theme::LINE);
     }
+    /// Pad the board with empty bordered rows until it has `n` total lines, so
+    /// every view fills the window to the same height (no "vide" below short
+    /// views). Caller appends the closing border afterwards.
+    pub fn pad_to_rows(&mut self, n: usize) {
+        while self.lines.len() < n {
+            self.bordered(|_| {});
+        }
+    }
+
     /// A bordered content line: `│ <content padded to W> │`.
     pub fn bordered(&mut self, build: impl FnOnce(&mut Line)) {
         let mut inner = Line::new();
@@ -87,17 +96,33 @@ impl Screen {
         l.push("│", theme::LINE);
     }
 
-    /// Paint the screen as monospace rows.
+    /// Paint the screen as tight monospace rows. Each line is ONE LayoutJob (a
+    /// single multi-colored label) → perfect column alignment and minimal row
+    /// height (no per-segment widget gaps).
     pub fn show(self, ui: &mut egui::Ui) {
+        use egui::text::{LayoutJob, TextFormat};
+        use egui::{FontFamily, FontId};
+        let font = FontId::new(13.0, FontFamily::Monospace);
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 1.0;
+            ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
             for line in self.lines {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    for seg in line.segs {
-                        ui.label(RichText::new(seg.text).monospace().color(seg.color));
-                    }
-                });
+                let mut job = LayoutJob::default();
+                for seg in line.segs {
+                    job.append(
+                        &seg.text,
+                        0.0,
+                        TextFormat {
+                            font_id: font.clone(),
+                            color: seg.color,
+                            ..Default::default()
+                        },
+                    );
+                }
+                // One galley per line → perfect alignment, tight row height.
+                let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
+                let (rect, _) =
+                    ui.allocate_exact_size(galley.size(), egui::Sense::hover());
+                ui.painter().galley(rect.min, galley, theme::FG);
             }
         });
     }
