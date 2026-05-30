@@ -516,7 +516,7 @@ pub fn build_frame(
             let vis = dwidth(&lbl);
             (format!("{}{lbl}{}", c_warn(&c), c.reset()), vis)
         } else {
-            let lbl = "←→ tabs · ? help · q quit";
+            let lbl = "←→ tabs · : cmds · ? help · q quit";
             (lbl.to_string(), dwidth(lbl))
         };
         let avail = inner.saturating_sub(2);
