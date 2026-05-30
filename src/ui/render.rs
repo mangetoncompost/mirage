@@ -1026,15 +1026,7 @@ fn build_cli(
 ) {
     let cfg = crate::CONFIG.load();
     if let Some(cl) = &f.client {
-        kv_row(
-            out,
-            c,
-            inner,
-            line,
-            "client",
-            &cl.name,
-            c.reset(),
-        );
+        kv_row(out, c, inner, line, "client", &cl.name, c.reset());
         kv_row(out, c, inner, line, "peer_id", &cl.peer_id, &c_dim(c));
         kv_row(out, c, inner, line, "user-agent", &cl.user_agent, &c_dim(c));
         kv_row(
