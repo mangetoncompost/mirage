@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Build](https://img.shields.io/github/actions/workflow/status/mangetoncompost/mirage/ci.yml?branch=main)](https://github.com/mangetoncompost/mirage/actions)
+[![Build](https://img.shields.io/github/actions/workflow/status/mangetoncompost/mirage/ci.yml?branch=master)](https://github.com/mangetoncompost/mirage/actions)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos-lightgrey)](https://github.com/mangetoncompost/mirage)
 
 ![Mirage dashboard demo](assets/demo.gif)
