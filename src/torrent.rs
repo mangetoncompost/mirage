@@ -205,18 +205,17 @@ impl Torrent {
     /// integrate early-return 0 when !can_upload(), so a Downloading torrent
     /// declares uploaded=0 everywhere automatically.
     pub fn can_upload(&self) -> bool {
-        self.is_seeding() && ((self.seeders > 0 && self.leechers > 0) || self.leechers > 1)
+        !crate::control::is_paused()
+            && self.is_seeding()
+            && ((self.seeders > 0 && self.leechers > 0) || self.leechers > 1)
     }
 
     /// Draw the per-torrent simulated download rate (bytes/s, >= 1) from config.
     /// Falls back to a sane band if CONFIG isn't set (some unit tests).
     fn pick_dl_rate() -> u64 {
-        let (lo, hi) = crate::CONFIG
-            .get()
-            .map(|c| (c.min_download_rate as u64, c.max_download_rate as u64))
-            .unwrap_or((8_192, 16_777_216));
-        let lo = lo.max(1);
-        let hi = hi.max(lo);
+        let cfg = crate::CONFIG.load();
+        let lo = (cfg.min_download_rate as u64).max(1);
+        let hi = (cfg.max_download_rate as u64).max(lo);
         fastrand::u64(lo..=hi)
     }
 
@@ -287,7 +286,7 @@ impl Torrent {
         let t = self.origin.elapsed().as_secs_f64();
         let speed = self.speed_at(t).round() as u32;
         self.next_upload_speed = speed;
-        let config = crate::CONFIG.get().unwrap();
+        let config = crate::CONFIG.load();
         trace!(
             torrent = %self.name,
             min = config.min_upload_rate,
@@ -308,7 +307,7 @@ impl Torrent {
         if !self.can_upload() {
             return 0.0;
         }
-        let cfg = crate::CONFIG.get().unwrap();
+        let cfg = crate::CONFIG.load();
         let (min, max) = (cfg.min_upload_rate as f64, cfg.max_upload_rate as f64);
         let c = (max + min) * 0.5; // centre
         let h = (max - min) * 0.5; // half-range
@@ -333,7 +332,7 @@ impl Torrent {
         if !self.can_upload() || !(t1 > t0) {
             return 0.0;
         }
-        let cfg = crate::CONFIG.get().unwrap();
+        let cfg = crate::CONFIG.load();
         let (min, max) = (cfg.min_upload_rate as f64, cfg.max_upload_rate as f64);
         let c = (max + min) * 0.5;
         let h = (max - min) * 0.5;
@@ -703,8 +702,8 @@ mod tests {
         let mut cfg = crate::config::Config::default();
         cfg.min_upload_rate = 1_048_576; // 1 MiB/s
         cfg.max_upload_rate = 10_485_760; // 10 MiB/s
-        let _ = crate::CONFIG.set(cfg);
-        let cfg = crate::CONFIG.get().unwrap();
+        crate::CONFIG.store(std::sync::Arc::new(cfg));
+        let cfg = crate::CONFIG.load();
         let (min, max) = (cfg.min_upload_rate as f64, cfg.max_upload_rate as f64);
 
         let mut t = Torrent {

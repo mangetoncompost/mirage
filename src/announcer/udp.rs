@@ -309,7 +309,7 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
     };
 
     // Get config values
-    let config = CONFIG.get().expect("Config not initialized");
+    let config = CONFIG.load();
     let port = config.port;
     // numwant = 0 on STOPPED (like a real Transmission), else config override or
     // the client profile's num_want.

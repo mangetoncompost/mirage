@@ -21,7 +21,7 @@ pub fn writable(path: &str) -> bool {
 
 /// Write a session file with torrent and its stats
 pub async fn write() {
-    let config = crate::CONFIG.get().unwrap();
+    let config = crate::CONFIG.load();
     if let Some(path) = config.output_stats.clone() {
         let mut data = String::with_capacity(4096);
 
