@@ -86,7 +86,7 @@ impl eframe::App for RatioUpApp {
 
         egui::Panel::bottom("repl").show_inside(ui, |ui| self.repl(ui));
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            egui::ScrollArea::both().show(ui, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
                 views::render(self, ui);
             });
         });
