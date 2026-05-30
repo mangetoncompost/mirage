@@ -7,15 +7,15 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'RatioUp'",
+            "name": "Debug executable 'mirage'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=RatioUp",
-                    "--package=RatioUp"
+                    "--bin=mirage",
+                    "--package=mirage"
                 ],
                 "filter": {
-                    "name": "RatioUp",
+                    "name": "mirage",
                     "kind": "bin"
                 }
             },
@@ -25,16 +25,16 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'RatioUp'",
+            "name": "Debug unit tests in executable 'mirage'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=RatioUp",
-                    "--package=RatioUp"
+                    "--bin=mirage",
+                    "--package=mirage"
                 ],
                 "filter": {
-                    "name": "RatioUp",
+                    "name": "mirage",
                     "kind": "bin"
                 }
             },
