@@ -91,10 +91,13 @@ pub(crate) fn parse_cli_args() -> Option<PathBuf> {
 }
 
 pub(crate) fn get_config_from_xdg() -> Option<PathBuf> {
-    let xdg = xdg::BaseDirectories::with_prefix("Mirage");
-    match xdg.place_config_file("config.toml") {
-        Ok(path) => return Some(path),
-        Err(e) => tracing::error!("Cannot create config file: {e}"),
+    #[cfg(unix)]
+    {
+        let xdg = xdg::BaseDirectories::with_prefix("Mirage");
+        match xdg.place_config_file("config.toml") {
+            Ok(path) => return Some(path),
+            Err(e) => tracing::error!("Cannot create config file: {e}"),
+        }
     }
     None
 }
@@ -258,6 +261,9 @@ async fn main() {
 }
 
 async fn write_pid_file() -> Option<PathBuf> {
+    #[cfg(not(unix))]
+    return None;
+    #[cfg(unix)]
     match xdg::BaseDirectories::new().place_runtime_file("mirage.pid") {
         Ok(file) => {
             match tokio::fs::write(file.clone(), std::process::id().to_string().as_bytes()).await {

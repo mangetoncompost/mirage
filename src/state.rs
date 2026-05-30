@@ -40,8 +40,9 @@ fn hex40(h: &[u8; 20]) -> String {
     s
 }
 
-/// Resolve the state file path (XDG state dir, fallback to a torrent_dir sidecar).
+/// Resolve the state file path (XDG state dir on Unix, torrent_dir sidecar elsewhere).
 fn state_path() -> PathBuf {
+    #[cfg(unix)]
     if let Ok(p) = xdg::BaseDirectories::with_prefix("Mirage").place_state_file("state.json") {
         return p;
     }

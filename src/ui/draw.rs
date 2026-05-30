@@ -112,12 +112,12 @@ pub fn paint(frame: &str) {
     let _ = execute!(o, MoveTo(0, 0));
     let _ = o.write_all(frame.as_bytes());
     // Drain the clipboard queue: emit OSC-52 once if pending.
-    if let Ok(mut g) = CLIP_PENDING.lock() {
-        if let Some(b64) = g.take() {
-            // ESC ] 52 ; c ; <base64> BEL
-            let osc = format!("\x1b]52;c;{b64}\x07");
-            let _ = o.write_all(osc.as_bytes());
-        }
+    if let Ok(mut g) = CLIP_PENDING.lock()
+        && let Some(b64) = g.take()
+    {
+        // ESC ] 52 ; c ; <base64> BEL
+        let osc = format!("\x1b]52;c;{b64}\x07");
+        let _ = o.write_all(osc.as_bytes());
     }
     let _ = o.flush();
 }

@@ -48,9 +48,11 @@ static SEL: AtomicUsize = AtomicUsize::new(0);
 static MARKED: Lazy<Mutex<HashSet<[u8; 20]>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
 /// Delegates to the unified overlay system in [`super::overlay`].
+#[allow(dead_code)]
 pub fn help_open() -> bool {
     super::overlay::help_open()
 }
+#[allow(dead_code)]
 pub fn toggle_help() {
     super::overlay::toggle_help();
 }
@@ -138,6 +140,7 @@ pub fn marked_set() -> HashSet<[u8; 20]> {
 }
 
 /// Whether a given hash is marked.
+#[allow(dead_code)]
 pub fn is_marked(hash: &[u8; 20]) -> bool {
     MARKED.lock().map(|g| g.contains(hash)).unwrap_or(false)
 }
