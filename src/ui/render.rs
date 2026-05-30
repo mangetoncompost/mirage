@@ -4,7 +4,8 @@
 //! followed by a clear-to-EOL so a shorter frame never leaves stale glyphs.
 
 use crate::ui::events::{EventKind, UiEvent};
-use crate::ui::snapshot::Frame;
+use crate::ui::snapshot::{Frame, TorrentView};
+use crate::ui::view::View;
 use crate::utils::{format_bytes, format_bytes_u64};
 
 // --- raw ANSI sequences -----------------------------------------------------
@@ -233,8 +234,16 @@ pub fn feed_capacity(term_h: u16, n_rows: usize, max_visible_rows: usize) -> usi
 /// Maximum torrent rows we draw before collapsing the rest into "(+N more)".
 const MAX_VISIBLE_ROWS: usize = 12;
 
+/// The nine tab labels, in order. Index == `View as usize`.
+const TAB_LABELS: [&str; 9] = [
+    "dash", "tor", "trk", "spd", "cli", "sch", "net", "log", "cfg",
+];
+
 /// Build the whole frame as one ANSI string ready for `draw::paint`.
-pub fn build_frame(f: &Frame, width: u16) -> String {
+///
+/// `view` selects which of the nine tab bodies to render; `sel` is the
+/// highlighted row within list-style views (Dashboard/Torrents/Trackers).
+pub fn build_frame(f: &Frame, width: u16, view: View, sel: usize) -> String {
     let c = Caps::detect();
     let b = box_set(c.utf8);
     let w = width.max(20) as usize;
@@ -332,37 +341,46 @@ pub fn build_frame(f: &Frame, width: u16) -> String {
         out.push_str(&top);
     }
 
-    // client line
+    // ---- tab strip ----------------------------------------------------------
+    // "[1]dash [2]tor … [9]cfg" — active label in header color, rest dim. On a
+    // narrow terminal where the full strip won't fit, fall back to bare digits
+    // "[1][2]…[9]" so the right border never clips mid-label.
     {
-        let (content, vis) = match &f.client {
-            Some(cl) => {
-                let peer = truncate(&cl.peer_id, 22, c.utf8);
-                let txt = format!(
-                    "{lab}client{r} {bold}{name}{r}   {lab}peer{r} {peer}   {lab}key{r} {key:#010x}",
-                    lab = c_dim(&c),
-                    r = c.reset(),
-                    bold = BOLD_if(c.color),
-                    name = cl.name,
-                    peer = peer,
-                    key = cl.key,
-                );
-                let vis = dwidth("client ")
-                    + dwidth(&cl.name)
-                    + dwidth("   peer ")
-                    + dwidth(&peer)
-                    + dwidth("   key ")
-                    + dwidth(&format!("{:#010x}", cl.key));
-                (txt, vis.min(inner.saturating_sub(2)))
+        let active_idx = view as usize;
+        let full_w: usize = TAB_LABELS
+            .iter()
+            .enumerate()
+            .map(|(i, lbl)| dwidth(&format!(" [{}]{} ", i + 1, lbl)))
+            .sum();
+        let mut strip = String::new();
+        let avail = inner.saturating_sub(2);
+        if full_w <= avail {
+            for (i, lbl) in TAB_LABELS.iter().enumerate() {
+                let on = i == active_idx;
+                let col = if on { c_header(&c) } else { c_dim(&c) };
+                strip.push_str(&col);
+                if on {
+                    strip.push_str(BOLD_if(c.color));
+                }
+                strip.push_str(&format!(" [{}]{} ", i + 1, lbl));
+                strip.push_str(c.reset());
             }
-            None => {
-                let txt = format!("{}waiting for client…{}", c_dim(&c), c.reset());
-                (txt, dwidth("waiting for client…"))
+        } else {
+            for i in 0..TAB_LABELS.len() {
+                let on = i == active_idx;
+                let col = if on { c_header(&c) } else { c_dim(&c) };
+                strip.push_str(&col);
+                if on {
+                    strip.push_str(BOLD_if(c.color));
+                }
+                strip.push_str(&format!("[{}]", i + 1));
+                strip.push_str(c.reset());
             }
-        };
-        line(&mut out, &content, vis);
+        }
+        line(&mut out, &strip, full_w.min(avail));
     }
 
-    // separator
+    // separator under the tab strip
     {
         out.push_str(&c_dim(&c));
         out.push_str(&rule(b.ml, b.mr, None));
@@ -371,49 +389,19 @@ pub fn build_frame(f: &Frame, width: u16) -> String {
         out.push_str("\r\n");
     }
 
-    // ---- torrent table ------------------------------------------------------
-    // column header
-    {
-        let bar_w = bar_width(inner);
-        let hdr = format!(
-            "{d}{name:<name_w$} {s:>4} {l:>4} {up:>10} {tot:>11} {nxt:>6} {pad}{r}",
-            d = c_dim(&c),
-            r = c.reset(),
-            name = "TORRENT",
-            name_w = name_col(inner, bar_w),
-            s = "S",
-            l = "L",
-            up = "↑ SPEED",
-            tot = "UPLOADED",
-            nxt = "NEXT",
-            pad = " ".repeat(bar_w + 1),
-        );
-        let vis = name_col(inner, bar_w) + 1 + 4 + 1 + 4 + 1 + 10 + 1 + 11 + 1 + 6 + 1 + bar_w + 1;
-        line(&mut out, &hdr, vis.min(inner.saturating_sub(2)));
-    }
-
-    let n = f.rows.len();
-    let visible = n.min(MAX_VISIBLE_ROWS);
-    for tv in f.rows.iter().take(visible) {
-        let (content, vis) = render_torrent_row(tv, &c, inner);
-        line(&mut out, &content, vis);
-    }
-    if n > MAX_VISIBLE_ROWS {
-        let more = format!("{}(+{} more)…{}", c_dim(&c), n - MAX_VISIBLE_ROWS, c.reset());
-        line(&mut out, &more, dwidth(&format!("(+{} more)…", n - MAX_VISIBLE_ROWS)));
-    }
-
-    // ---- feed pane ----------------------------------------------------------
-    {
-        out.push_str(&c_dim(&c));
-        out.push_str(&rule(b.ml, b.mr, Some("recent")));
-        out.push_str(c.reset());
-        out.push_str(CLR_EOL);
-        out.push_str("\r\n");
-    }
-    for ev in f.feed.iter() {
-        let (content, vis) = render_event_row(ev, &c, inner);
-        line(&mut out, &content, vis);
+    // ---- view body ----------------------------------------------------------
+    // Each builder emits its rows through the shared `line`/`rule` helpers so
+    // every view keeps identical width/box/color discipline.
+    match view {
+        View::Dashboard => build_dash(&mut out, f, &c, &b, inner, sel, &line, &rule),
+        View::Torrents => build_tor(&mut out, f, &c, &b, inner, sel, &line, &rule),
+        View::Trackers => build_trk(&mut out, f, &c, inner, sel, &line),
+        View::Speeds => build_spd(&mut out, f, &c, &b, inner, sel, &line, &rule),
+        View::Client => build_cli(&mut out, f, &c, &b, inner, &line, &rule),
+        View::Schedule => build_sch(&mut out, f, &c, inner, &line),
+        View::Network => build_net(&c, inner, &mut out, &line),
+        View::Logs => build_log(&mut out, f, &c, inner, &line),
+        View::Config => build_cfg(&c, &b, inner, &mut out, &line, &rule),
     }
 
     // ---- footer -------------------------------------------------------------
@@ -425,6 +413,7 @@ pub fn build_frame(f: &Frame, width: u16) -> String {
         out.push_str("\r\n");
     }
     {
+        let n = f.rows.len();
         let total_up: u64 = f.rows.iter().map(|t| t.uploaded).sum();
         let total_speed: u32 = f.rows.iter().map(|t| t.up_speed).sum();
         let total_err: u32 = f.rows.iter().map(|t| t.error_count as u32).sum();
@@ -441,7 +430,7 @@ pub fn build_frame(f: &Frame, width: u16) -> String {
             spd = format_bytes(total_speed),
             err = total_err,
         );
-        let txt = format!(
+        let mut txt = format!(
             "{bold}{n}{r} torrent{plural}   {ok}↑ total {tot}{r}   {warn}up {spd}/s{r}   {err}",
             bold = BOLD_if(c.color),
             r = c.reset(),
@@ -453,7 +442,20 @@ pub fn build_frame(f: &Frame, width: u16) -> String {
             spd = format_bytes(total_speed),
             err = err_span,
         );
-        line(&mut out, &txt, dwidth(&plain).min(inner.saturating_sub(2)));
+        // Right-aligned key hint when the line has room for it.
+        let hint = "←→ tabs · q quit";
+        let avail = inner.saturating_sub(2);
+        let used = dwidth(&plain);
+        let mut vis = used;
+        if used + 3 + dwidth(hint) <= avail {
+            let gap = avail - used - dwidth(hint);
+            txt.push_str(&" ".repeat(gap));
+            txt.push_str(&c_dim(&c));
+            txt.push_str(hint);
+            txt.push_str(c.reset());
+            vis = avail;
+        }
+        line(&mut out, &txt, vis.min(avail));
     }
 
     // bottom border
@@ -468,6 +470,418 @@ pub fn build_frame(f: &Frame, width: u16) -> String {
     // wipe any stale rows from a previously taller frame
     out.push_str(CLR_BELOW);
     out
+}
+
+// ============================================================================
+// Per-view body builders. Each emits its rows through the shared `line`/`rule`
+// closures handed down from build_frame, so they all keep identical width / box
+// / color discipline. `Line` = bordered content row, `Rule` = horizontal rule.
+// ============================================================================
+
+type Line<'a> = dyn Fn(&mut String, &str, usize) + 'a;
+type Rule<'a> = dyn Fn(&str, &str, Option<&str>) -> String + 'a;
+
+/// Emit a horizontal rule line (with optional label) through the `rule` closure.
+fn rule_line(out: &mut String, c: &Caps, b: &Box, rule: &Rule, label: Option<&str>) {
+    out.push_str(&c_dim(c));
+    out.push_str(&rule(b.ml, b.mr, label));
+    out.push_str(c.reset());
+    out.push_str(CLR_EOL);
+    out.push_str("\r\n");
+}
+
+/// A simple "  key   value" row used by several settings-style views.
+fn kv_row(out: &mut String, c: &Caps, inner: usize, line: &Line, key: &str, val: &str, col: &str) {
+    let txt = format!(
+        "{d} {k:<14} {r}{col}{v}{r}",
+        d = c_dim(c),
+        k = key,
+        r = c.reset(),
+        col = col,
+        v = val,
+    );
+    let vis = (1 + 14 + 1 + dwidth(val)).min(inner.saturating_sub(2));
+    line(out, &txt, vis);
+}
+
+// ---- [1] dash : the original dashboard body, kept byte-identical -----------
+#[allow(clippy::too_many_arguments)]
+fn build_dash(
+    out: &mut String,
+    f: &Frame,
+    c: &Caps,
+    b: &Box,
+    inner: usize,
+    sel: usize,
+    line: &Line,
+    rule: &Rule,
+) {
+    // client line
+    {
+        let (content, vis) = match &f.client {
+            Some(cl) => {
+                let peer = truncate(&cl.peer_id, 22, c.utf8);
+                let txt = format!(
+                    "{lab}client{r} {bold}{name}{r}   {lab}peer{r} {peer}   {lab}key{r} {key:#010x}",
+                    lab = c_dim(c),
+                    r = c.reset(),
+                    bold = BOLD_if(c.color),
+                    name = cl.name,
+                    peer = peer,
+                    key = cl.key,
+                );
+                let vis = dwidth("client ")
+                    + dwidth(&cl.name)
+                    + dwidth("   peer ")
+                    + dwidth(&peer)
+                    + dwidth("   key ")
+                    + dwidth(&format!("{:#010x}", cl.key));
+                (txt, vis.min(inner.saturating_sub(2)))
+            }
+            None => {
+                let txt = format!("{}waiting for client…{}", c_dim(c), c.reset());
+                (txt, dwidth("waiting for client…"))
+            }
+        };
+        line(out, &content, vis);
+    }
+
+    // separator
+    rule_line(out, c, b, rule, None);
+
+    // ---- torrent table ------------------------------------------------------
+    {
+        let bar_w = bar_width(inner);
+        let hdr = format!(
+            "{d}{name:<name_w$} {s:>4} {l:>4} {up:>10} {tot:>11} {nxt:>6} {pad}{r}",
+            d = c_dim(c),
+            r = c.reset(),
+            name = "TORRENT",
+            name_w = name_col(inner, bar_w),
+            s = "S",
+            l = "L",
+            up = "↑ SPEED",
+            tot = "UPLOADED",
+            nxt = "NEXT",
+            pad = " ".repeat(bar_w + 1),
+        );
+        let vis = name_col(inner, bar_w) + 1 + 4 + 1 + 4 + 1 + 10 + 1 + 11 + 1 + 6 + 1 + bar_w + 1;
+        line(out, &hdr, vis.min(inner.saturating_sub(2)));
+    }
+
+    let n = f.rows.len();
+    let visible = n.min(MAX_VISIBLE_ROWS);
+    for (i, tv) in f.rows.iter().take(visible).enumerate() {
+        let (content, vis) = render_torrent_row(tv, c, inner);
+        emit_row(out, c, inner, line, &content, vis, i == sel);
+    }
+    if n > MAX_VISIBLE_ROWS {
+        let more = format!("{}(+{} more)…{}", c_dim(c), n - MAX_VISIBLE_ROWS, c.reset());
+        line(out, &more, dwidth(&format!("(+{} more)…", n - MAX_VISIBLE_ROWS)));
+    }
+
+    // ---- feed pane ----------------------------------------------------------
+    rule_line(out, c, b, rule, Some("recent"));
+    for ev in f.feed.iter() {
+        let (content, vis) = render_event_row(ev, c, inner);
+        line(out, &content, vis);
+    }
+}
+
+/// Emit a content row, optionally with a selection marker (reverse-video-ish
+/// cyan caret) when `selected`. The marker is drawn as a leading "›" the row
+/// content already reserves no space for, so we prefix it inside the budget.
+fn emit_row(
+    out: &mut String,
+    c: &Caps,
+    inner: usize,
+    line: &Line,
+    content: &str,
+    vis: usize,
+    selected: bool,
+) {
+    if selected {
+        // Prefix a cyan caret; the row content keeps its own width, so we add 2
+        // visible cells ("› ") and trust clamp_visible to keep the right border.
+        let marked = format!("{}›{} {}", c_header(c), c.reset(), content);
+        line(out, &marked, (vis + 2).min(inner.saturating_sub(2)));
+    } else {
+        // Two leading spaces to align with the caret rows.
+        let padded = format!("  {content}");
+        line(out, &padded, (vis + 2).min(inner.saturating_sub(2)));
+    }
+}
+
+// ---- [2] tor : full torrent list with state ------------------------------
+#[allow(clippy::too_many_arguments)]
+fn build_tor(
+    out: &mut String,
+    f: &Frame,
+    c: &Caps,
+    b: &Box,
+    inner: usize,
+    sel: usize,
+    line: &Line,
+    rule: &Rule,
+) {
+    // column header
+    let hdr = format!(
+        "{d}  {num:>3} {name:<22}{state:<9}{s:>5}{l:>5} {up}{r}",
+        d = c_dim(c),
+        r = c.reset(),
+        num = "#",
+        name = "NAME",
+        state = "STATE",
+        s = "S",
+        l = "L",
+        up = "UPLOAD",
+    );
+    line(out, &hdr, inner.saturating_sub(2));
+
+    for (i, tv) in f.rows.iter().enumerate() {
+        let dot = dot_span(tv, c);
+        let name = truncate(&tv.name, 21, c.utf8);
+        let state = if tv.downloading {
+            format!("DL{}%", tv.dl_percent)
+        } else if tv.error_count > 0 {
+            "error".to_string()
+        } else {
+            "seed".to_string()
+        };
+        let body = format!(
+            "{d}{num:>3}{r} {dot} {name:<21}{d}{state:<9}{r}{ok}{s:>5}{r}{lc}{l:>5}{r}{d} {up:>8}{r}",
+            d = c_dim(c),
+            r = c.reset(),
+            num = i + 1,
+            dot = dot,
+            name = name,
+            state = state,
+            ok = c_ok(c),
+            s = tv.seeders,
+            lc = if tv.leechers > 0 { c_ok(c) } else { c_dim(c) },
+            l = tv.leechers,
+            up = format_bytes_u64(tv.uploaded),
+        );
+        let vis = 3 + 1 + 2 + dwidth(&name) + 9 + 5 + 5 + 1 + 8;
+        emit_row(out, c, inner, line, &body, vis.min(inner.saturating_sub(2)), i == sel);
+    }
+
+    rule_line(out, c, b, rule, None);
+    let help = format!(
+        "{cy}↵{r} detail   {cy}p{r} pause-row   {cy}f{r} force   {rd}x{r} remove",
+        cy = c_header(c),
+        rd = c_err(c),
+        r = c.reset(),
+    );
+    line(out, &help, dwidth("↵ detail   p pause-row   f force   x remove"));
+}
+
+// ---- [3] trk : per-torrent trackers --------------------------------------
+fn build_trk(out: &mut String, f: &Frame, c: &Caps, inner: usize, sel: usize, line: &Line) {
+    let hdr = format!("{d} per-torrent trackers (snapshot){r}", d = c_dim(c), r = c.reset());
+    line(out, &hdr, dwidth(" per-torrent trackers (snapshot)"));
+    for (i, tv) in f.rows.iter().enumerate() {
+        let dot = dot_span(tv, c);
+        let url = tv.urls.first().map(|u| u.as_str()).unwrap_or("(no tracker)");
+        let host = url
+            .split("://")
+            .nth(1)
+            .unwrap_or(url)
+            .split('/')
+            .next()
+            .unwrap_or(url);
+        let name = truncate(&tv.name, 26, c.utf8);
+        let body = format!(
+            "{dot} {cy}{name:<26}{r} {host}  {ok}S{s} L{l}{r}",
+            dot = dot,
+            cy = c_header(c),
+            name = name,
+            r = c.reset(),
+            host = host,
+            ok = c_ok(c),
+            s = tv.seeders,
+            l = tv.leechers,
+        );
+        let vis = 2 + 26 + 1 + dwidth(host) + 2 + dwidth(&format!("S{} L{}", tv.seeders, tv.leechers));
+        emit_row(out, c, inner, line, &body, vis.min(inner.saturating_sub(2)), i == sel);
+    }
+}
+
+// ---- [4] spd : upload/download bands + multiplier -------------------------
+#[allow(clippy::too_many_arguments)]
+fn build_spd(
+    out: &mut String,
+    f: &Frame,
+    c: &Caps,
+    b: &Box,
+    inner: usize,
+    sel: usize,
+    line: &Line,
+    rule: &Rule,
+) {
+    let cfg = crate::CONFIG.load();
+    let setting = |out: &mut String, idx: usize, label: &str, val: &str, arrows: bool| {
+        let on = idx == sel;
+        let lc = if on { c_header(c) } else { c_dim(c) };
+        let mut txt = format!(
+            "{lc} {label:<14} {r}{d}[ {r}{warn}{val:<13}{r}{d}]{r}",
+            lc = lc,
+            label = label,
+            r = c.reset(),
+            d = c_dim(c),
+            warn = c_warn(c),
+            val = val,
+        );
+        let mut vis = 1 + 14 + 1 + 2 + 13 + 1;
+        if on && arrows {
+            txt.push_str(&format!("{cy}  +/- edit{r}", cy = c_header(c), r = c.reset()));
+            vis += dwidth("  +/- edit");
+        }
+        line(out, &txt, vis.min(inner.saturating_sub(2)));
+    };
+    rule_line(out, c, b, rule, Some("upload band"));
+    setting(out, 0, "min upload", &format!("{}/s", format_bytes(cfg.min_upload_rate)), true);
+    setting(out, 1, "max upload", &format!("{}/s", format_bytes(cfg.max_upload_rate)), true);
+    setting(out, 2, "multiplier", &format!("x{:.2}", crate::torrent::speed_multiplier()), true);
+    rule_line(out, c, b, rule, Some("download phase"));
+    setting(out, 3, "min download", &format!("{}/s", format_bytes(cfg.min_download_rate)), true);
+    setting(out, 4, "max download", &format!("{}/s", format_bytes(cfg.max_download_rate)), true);
+    setting(out, 5, "numwant", &cfg.numwant.unwrap_or(80).to_string(), true);
+    rule_line(out, c, b, rule, Some("total upload (live)"));
+    let total_up: u64 = f.rows.iter().map(|t| t.uploaded).sum();
+    let total_speed: u32 = f.rows.iter().map(|t| t.up_speed).sum();
+    let txt = format!(
+        "{d}  up {r}{warn}{spd}/s{r}{d}   Σ {r}{ok}{tot}{r}",
+        d = c_dim(c),
+        r = c.reset(),
+        warn = c_warn(c),
+        spd = format_bytes(total_speed),
+        ok = c_ok(c),
+        tot = format_bytes_u64(total_up),
+    );
+    let vis = dwidth(&format!("  up {}/s   Σ {}", format_bytes(total_speed), format_bytes_u64(total_up)));
+    line(out, &txt, vis.min(inner.saturating_sub(2)));
+}
+
+// ---- [5] cli : client identity + what the tracker sees --------------------
+fn build_cli(
+    out: &mut String,
+    f: &Frame,
+    c: &Caps,
+    b: &Box,
+    inner: usize,
+    line: &Line,
+    rule: &Rule,
+) {
+    let cfg = crate::CONFIG.load();
+    if let Some(cl) = &f.client {
+        kv_row(out, c, inner, line, "client", &cl.name, &c.reset().to_string());
+        kv_row(out, c, inner, line, "peer_id", &cl.peer_id, &c_dim(c));
+        kv_row(out, c, inner, line, "user-agent", &cl.user_agent, &c_dim(c));
+        kv_row(out, c, inner, line, "key", &format!("{:#010x}", cl.key), &c_dim(c));
+        kv_row(out, c, inner, line, "download phase", "on (leech → completed → seed)", &c_ok(c));
+        rule_line(out, c, b, rule, Some("what the tracker sees"));
+        let get = format!(
+            "{d} GET /announce?peer_id={pid}&numwant={nw}&key={key:#010x}&event=started{r}",
+            d = c_dim(c),
+            pid = cl.peer_id,
+            nw = cfg.numwant.unwrap_or(80),
+            key = cl.key,
+            r = c.reset(),
+        );
+        line(out, &get, inner.saturating_sub(2));
+        let help = format!("{cy} k {r}{d}re-init client (new key){r}", cy = c_header(c), d = c_dim(c), r = c.reset());
+        line(out, &help, dwidth(" k re-init client (new key)"));
+    } else {
+        line(out, &format!("{}waiting for client…{}", c_dim(c), c.reset()), dwidth("waiting for client…"));
+    }
+}
+
+// ---- [6] sch : seed mode + global pause -----------------------------------
+fn build_sch(out: &mut String, _f: &Frame, c: &Caps, inner: usize, line: &Line) {
+    line(
+        out,
+        &format!("{d} seed mode    always  (night/custom: roadmap){r}", d = c_dim(c), r = c.reset()),
+        dwidth(" seed mode    always  (night/custom: roadmap)"),
+    );
+    let paused = crate::control::is_paused();
+    let state = if paused {
+        format!("{rd}[ ] paused{r}", rd = c_err(c), r = c.reset())
+    } else {
+        format!("{ok}[x] running{r}", ok = c_ok(c), r = c.reset())
+    };
+    let txt = format!(
+        "{d} global       {r}{state}{d}   (p to toggle){r}",
+        d = c_dim(c),
+        r = c.reset(),
+        state = state,
+    );
+    let vis = dwidth(" global       ") + dwidth(if paused { "[ ] paused" } else { "[x] running" }) + dwidth("   (p to toggle)");
+    line(out, &txt, vis.min(inner.saturating_sub(2)));
+}
+
+// ---- [7] net : network settings -------------------------------------------
+fn build_net(c: &Caps, inner: usize, out: &mut String, line: &Line) {
+    let cfg = crate::CONFIG.load();
+    kv_row(out, c, inner, line, "port", &cfg.port.to_string(), &c_warn(c));
+    kv_row(out, c, inner, line, "numwant", &cfg.numwant.unwrap_or(80).to_string(), &c_warn(c));
+    kv_row(out, c, inner, line, "torrent dir", &cfg.torrent_dir.display().to_string(), &c_dim(c));
+    kv_row(out, c, inner, line, "pid file", if cfg.use_pid_file { "on" } else { "off" }, &c_dim(c));
+}
+
+// ---- [8] log : the in-process event ring (tracing is off in TUI mode) ------
+fn build_log(out: &mut String, f: &Frame, c: &Caps, inner: usize, line: &Line) {
+    if f.feed.is_empty() {
+        line(
+            out,
+            &format!("{d} (no events yet — they appear here as the engine runs){r}", d = c_dim(c), r = c.reset()),
+            dwidth(" (no events yet — they appear here as the engine runs)"),
+        );
+    }
+    for ev in f.feed.iter() {
+        let (content, vis) = render_event_row(ev, c, inner);
+        line(out, &content, vis);
+    }
+}
+
+// ---- [9] cfg : config.toml mirror -----------------------------------------
+fn build_cfg(c: &Caps, b: &Box, inner: usize, out: &mut String, line: &Line, rule: &Rule) {
+    let cfg = crate::CONFIG.load();
+    rule_line(out, c, b, rule, Some("config.toml"));
+    let kvc = |out: &mut String, k: &str, v: &str, col: &str| {
+        let txt = format!(
+            "{d} {k:>18} = {r}{col}{v}{r}",
+            d = c_dim(c),
+            k = k,
+            r = c.reset(),
+            col = col,
+            v = v,
+        );
+        let vis = (1 + 18 + 3 + dwidth(v)).min(inner.saturating_sub(2));
+        line(out, &txt, vis);
+    };
+    kvc(out, "client", &format!("\"{}\"", cfg.client), &c_ok(c));
+    kvc(out, "port", &cfg.port.to_string(), &c_warn(c));
+    kvc(out, "min_upload_rate", &cfg.min_upload_rate.to_string(), &c_warn(c));
+    kvc(out, "max_upload_rate", &cfg.max_upload_rate.to_string(), &c_warn(c));
+    kvc(out, "min_download_rate", &cfg.min_download_rate.to_string(), &c_warn(c));
+    kvc(out, "max_download_rate", &cfg.max_download_rate.to_string(), &c_warn(c));
+    kvc(out, "numwant", &cfg.numwant.unwrap_or(80).to_string(), &c_warn(c));
+    let help = format!("{cy} s {r}{d}save config.toml{r}", cy = c_header(c), d = c_dim(c), r = c.reset());
+    line(out, &help, dwidth(" s save config.toml"));
+}
+
+/// Colored status dot for a torrent (matches render_torrent_row's logic).
+fn dot_span(tv: &TorrentView, c: &Caps) -> String {
+    if tv.error_count > 0 {
+        format!("{}●{}", c_err(c), c.reset())
+    } else if tv.downloading {
+        format!("{}●{}", c_warn(c), c.reset())
+    } else if tv.up_speed > 0 {
+        format!("{}●{}", c_ok(c), c.reset())
+    } else {
+        format!("{}●{}", c_dim(c), c.reset())
+    }
 }
 
 fn render_torrent_row(tv: &crate::ui::snapshot::TorrentView, c: &Caps, inner: usize) -> (String, usize) {

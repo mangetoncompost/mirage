@@ -12,6 +12,7 @@ mod events;
 pub mod keys;
 mod render;
 mod snapshot;
+pub mod view;
 
 pub use events::{EventKind, emit};
 
@@ -54,6 +55,13 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
             _ = tick.tick() => {
                 let (w, h) = term_size();
                 let rows = snapshot_torrents().await;
+                // Publish row identities for the key thread, then clamp the
+                // (atomic) selection to the live count so a shrunk torrent list
+                // never leaves the cursor past the end.
+                view::set_rows(rows.iter().map(|r| r.info_hash).collect());
+                view::clamp_sel(rows.len());
+                let active = view::active_view();
+                let sel = view::sel();
                 let feed_lines = render::feed_capacity(h, rows.len(), 12);
                 let frame = Frame {
                     client: snapshot_client().await,
@@ -63,7 +71,7 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
                     feed: events::snapshot(feed_lines),
                     spinner,
                 };
-                let s = render::build_frame(&frame, w); // pure, no locks/IO
+                let s = render::build_frame(&frame, w, active, sel); // pure, no locks/IO
                 draw::paint(&s);
                 spinner = spinner.wrapping_add(1);
             }
