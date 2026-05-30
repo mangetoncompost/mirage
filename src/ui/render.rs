@@ -469,17 +469,20 @@ pub fn build_frame(f: &Frame, width: u16, view: View, sel: usize) -> String {
         line(&mut out, &txt, vis.min(avail));
     }
 
-    // bottom border
+    // Wipe any stale rows from a previously taller frame BEFORE the bottom
+    // border, so clearing-below doesn't touch the last row we draw.
+    out.push_str(CLR_BELOW);
+
+    // bottom border — the LAST row of the frame. No trailing newline: that would
+    // push the cursor onto a row below the box, leaving a blank line (with the
+    // cursor) under the footer. Keeping the cursor on the bottom border makes
+    // the box occupy exactly `term_h` rows.
     {
         out.push_str(&c_dim(&c));
         out.push_str(&rule(b.bl, b.br, None));
         out.push_str(c.reset());
         out.push_str(CLR_EOL);
-        out.push_str("\r\n");
     }
-
-    // wipe any stale rows from a previously taller frame
-    out.push_str(CLR_BELOW);
     out
 }
 
@@ -561,14 +564,20 @@ fn build_dash(
     rule_line(out, c, b, rule, None);
 
     // ---- torrent table ------------------------------------------------------
+    // Header carries the same 2-cell selection gutter as the rows (drawn by
+    // emit_row), and is sized against the same table_body_w, so every column
+    // lines up exactly under its heading.
     {
-        let bar_w = bar_width(inner);
+        let body_w = table_body_w(inner);
+        let bar_w = bar_width(body_w);
+        let name_w = name_col(body_w, bar_w);
         let hdr = format!(
-            "{d}{name:<name_w$} {s:>4} {l:>4} {up:>10} {tot:>11} {nxt:>6} {pad}{r}",
+            "{gut}{d}{name:<name_w$} {s:>4} {l:>4} {up:>10} {tot:>11} {nxt:>6} {pad}{r}",
+            gut = " ".repeat(SEL_GUTTER),
             d = c_dim(c),
             r = c.reset(),
             name = "TORRENT",
-            name_w = name_col(inner, bar_w),
+            name_w = name_w,
             s = "S",
             l = "L",
             up = "↑ SPEED",
@@ -576,7 +585,7 @@ fn build_dash(
             nxt = "NEXT",
             pad = " ".repeat(bar_w + 1),
         );
-        let vis = name_col(inner, bar_w) + 1 + 4 + 1 + 4 + 1 + 10 + 1 + 11 + 1 + 6 + 1 + bar_w + 1;
+        let vis = SEL_GUTTER + name_w + 1 + 4 + 1 + 4 + 1 + 10 + 1 + 11 + 1 + 6 + 1 + bar_w + 1;
         line(out, &hdr, vis.min(inner.saturating_sub(2)));
     }
 
@@ -602,9 +611,10 @@ fn build_dash(
     let _ = f.feed_cap;
 }
 
-/// Emit a content row, optionally with a selection marker (reverse-video-ish
-/// cyan caret) when `selected`. The marker is drawn as a leading "›" the row
-/// content already reserves no space for, so we prefix it inside the budget.
+/// Emit a list row with the `SEL_GUTTER`-cell selection gutter at the left:
+/// "› " (cyan caret) when selected, else two spaces. `content` is already sized
+/// for `table_body_w` (the bordered area minus the gutter), so gutter + content
+/// fits the row exactly and the columns line up under the header.
 fn emit_row(
     out: &mut String,
     c: &Caps,
@@ -614,16 +624,13 @@ fn emit_row(
     vis: usize,
     selected: bool,
 ) {
-    if selected {
-        // Prefix a cyan caret; the row content keeps its own width, so we add 2
-        // visible cells ("› ") and trust clamp_visible to keep the right border.
-        let marked = format!("{}›{} {}", c_header(c), c.reset(), content);
-        line(out, &marked, (vis + 2).min(inner.saturating_sub(2)));
+    let gutter = if selected {
+        format!("{}›{} ", c_header(c), c.reset())
     } else {
-        // Two leading spaces to align with the caret rows.
-        let padded = format!("  {content}");
-        line(out, &padded, (vis + 2).min(inner.saturating_sub(2)));
-    }
+        " ".repeat(SEL_GUTTER)
+    };
+    let row = format!("{gutter}{content}");
+    line(out, &row, (SEL_GUTTER + vis).min(inner.saturating_sub(2)));
 }
 
 // ---- [2] tor : full torrent list with state ------------------------------
@@ -898,9 +905,20 @@ fn dot_span(tv: &TorrentView, c: &Caps) -> String {
     }
 }
 
+/// Width of one torrent row's body — the bordered area (`inner-2`) minus the
+/// 2-cell selection gutter. Header and rows both size against this so columns
+/// line up exactly under the header.
+fn table_body_w(inner: usize) -> usize {
+    inner.saturating_sub(2).saturating_sub(SEL_GUTTER)
+}
+
+/// Cells reserved at the left of every list row for the selection caret.
+const SEL_GUTTER: usize = 2;
+
 fn render_torrent_row(tv: &crate::ui::snapshot::TorrentView, c: &Caps, inner: usize) -> (String, usize) {
-    let bar_w = bar_width(inner);
-    let name_w = name_col(inner, bar_w);
+    let body_w = table_body_w(inner);
+    let bar_w = bar_width(body_w);
+    let name_w = name_col(body_w, bar_w);
 
     if tv.busy {
         let name = "(announcing…)";
@@ -918,7 +936,7 @@ fn render_torrent_row(tv: &crate::ui::snapshot::TorrentView, c: &Caps, inner: us
             bar = progress_bar(0, 1, bar_w, c),
         );
         let vis = name_w + 1 + 4 + 1 + 4 + 1 + 10 + 1 + 11 + 1 + 6 + 1 + bar_w + 1;
-        return (txt, vis.min(inner.saturating_sub(2)));
+        return (txt, vis.min(body_w));
     }
 
     let name = truncate(&tv.name, name_w, c.utf8);
@@ -977,7 +995,7 @@ fn render_torrent_row(tv: &crate::ui::snapshot::TorrentView, c: &Caps, inner: us
     );
     let _ = dot_ascii;
     let vis = name_w + 1 + 4 + 1 + 4 + 1 + 10 + 1 + 11 + 1 + 6 + 1 + bar_w + 1;
-    (txt, vis.min(inner.saturating_sub(2)))
+    (txt, vis.min(body_w))
 }
 
 fn render_event_row(ev: &UiEvent, c: &Caps, inner: usize) -> (String, usize) {
