@@ -39,12 +39,13 @@ pub fn run() {
         .expect("spawn engine thread");
 
     // eframe on the main thread.
-    // Compact window sized to the monospace board (~64 cols × ~26 rows), like a
-    // small terminal. The board is centered inside it.
+    // Window sized snugly to the monospace board (66 cols × 24 rows + REPL) so it
+    // reads like a small terminal with no empty space. Every view pads to the
+    // same height (see views::BOARD_ROWS), so the board always fills it.
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([600.0, 460.0])
-            .with_min_inner_size([560.0, 380.0])
+            .with_inner_size([530.0, 432.0])
+            .with_min_inner_size([530.0, 432.0])
             .with_title("RatioUp"),
         ..Default::default()
     };

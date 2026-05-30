@@ -8,7 +8,12 @@ use super::theme;
 use crate::control::TorrentView;
 use crate::utils::format_bytes_u64 as fb;
 
-const SPIN: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+// ASCII spinner (egui's monospace font lacks braille glyphs → they show as □).
+const SPIN: [&str; 4] = ["|", "/", "-", "\\"];
+
+// Total board height (rows incl. top/bottom borders). Every view pads to this so
+// the board always fills the window — the window is sized to match in `mod.rs`.
+const BOARD_ROWS: usize = 24;
 
 fn dotcol(t: &TorrentView) -> egui::Color32 {
     if t.error_count > 0 {
@@ -36,7 +41,7 @@ fn chrome(app: &RatioUpApp, sc: &mut Screen) {
     let l = sc.line();
     l.push("╭", theme::LINE);
     l.push(" ›Ratio ", theme::CY);
-    let right = format!(" {}  x{:.2}  up {} ", SPIN[app.spin % 10], mult, hms(up));
+    let right = format!(" {}  x{:.2}  up {} ", SPIN[app.spin % SPIN.len()], mult, hms(up));
     let used = 1 + " ›Ratio ".chars().count() + right.chars().count();
     if used < term::W + 2 {
         l.push("─".repeat(term::W + 2 - used), theme::LINE);
@@ -71,6 +76,8 @@ pub fn render(app: &mut RatioUpApp, ui: &mut egui::Ui) {
         View::Logs => v_log(app, &mut sc),
         View::Config => v_cfg(app, &mut sc),
     }
+    // Every view fills to the same height: dense board, no empty gap below.
+    sc.pad_to_rows(BOARD_ROWS - 1);
     sc.rule("╰", "╯", None);
     sc.show(ui);
 }
