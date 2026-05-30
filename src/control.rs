@@ -22,6 +22,79 @@ pub static SNAPSHOT: Lazy<ArcSwap<Snapshot>> = Lazy::new(|| ArcSwap::from_pointe
 /// Channel the GUI uses to request structural mutations; the scheduler drains it.
 pub static CMD: std::sync::OnceLock<UnboundedSender<Cmd>> = std::sync::OnceLock::new();
 
+/// The egui context, registered by the GUI so the engine can wake a repaint
+/// immediately after publishing a fresh snapshot (instead of waiting the 1s tick).
+pub static EGUI: std::sync::OnceLock<egui::Context> = std::sync::OnceLock::new();
+
+/// Publish a new snapshot and wake the GUI to repaint (no-op without a GUI).
+pub fn publish(snap: Snapshot) {
+    SNAPSHOT.store(std::sync::Arc::new(snap));
+    if let Some(ctx) = EGUI.get() {
+        ctx.request_repaint();
+    }
+}
+
+/// Build a fresh snapshot from live engine state (read lock + per-torrent
+/// try_lock → POD, never holds a lock across .await), then publish it. Cheap;
+/// safe to call ~1/s from a GUI publisher task. No-op cost when no GUI.
+pub async fn build_and_publish() {
+    let client = crate::CLIENT.read().await.as_ref().map(|c| ClientView {
+        name: c.name.clone(),
+        peer_id: c.peer_id.clone(),
+        key: crate::config::KEY_HEX.load().as_str().to_string(),
+        user_agent: c.user_agent.clone(),
+    });
+    let mut rows = Vec::new();
+    let mut total_uploaded = 0u64;
+    let mut total_up_speed = 0u64;
+    let mut error_count = 0u32;
+    {
+        let list = crate::TORRENTS.read().await;
+        for m in list.iter() {
+            if let Ok(t) = m.try_lock() {
+                let elapsed = t.last_announce.elapsed().as_secs();
+                let up = t.speed_at(t.origin.elapsed().as_secs_f64()).round() as u32;
+                let dl_percent = if t.length == 0 {
+                    100
+                } else {
+                    (t.declared_downloaded() as u128 * 100 / t.length as u128) as u8
+                };
+                total_uploaded += t.uploaded;
+                total_up_speed += up as u64;
+                if t.error_count > 0 {
+                    error_count += 1;
+                }
+                rows.push(TorrentView {
+                    name: t.name.clone(),
+                    info_hash: t.info_hash,
+                    length: t.length,
+                    seeders: t.seeders,
+                    leechers: t.leechers,
+                    up_speed: up,
+                    uploaded: t.uploaded,
+                    downloaded: t.declared_downloaded(),
+                    left: t.declared_left(),
+                    interval: t.interval,
+                    secs_to_announce: t.interval.saturating_sub(elapsed),
+                    error_count: t.error_count,
+                    downloading: !t.is_seeding(),
+                    dl_percent,
+                    paused: false, // per-torrent pause not yet modeled in Torrent
+                });
+            }
+        }
+    }
+    publish(Snapshot {
+        client,
+        rows,
+        total_uploaded,
+        total_up_speed,
+        multiplier: crate::torrent::speed_multiplier(),
+        paused: is_paused(),
+        error_count,
+    });
+}
+
 #[inline]
 pub fn is_paused() -> bool {
     PAUSED.load(Ordering::Relaxed)
@@ -65,6 +138,8 @@ pub enum Cmd {
 }
 
 /// POD copy of one torrent for one GUI frame. No borrows, no locks.
+/// Some fields are part of the published data model for future views.
+#[allow(dead_code)]
 #[derive(Clone, Default)]
 pub struct TorrentView {
     pub name: String,
@@ -93,6 +168,7 @@ pub struct ClientView {
 }
 
 /// Everything the GUI renders for one frame. Published by the scheduler.
+#[allow(dead_code)]
 #[derive(Clone, Default)]
 pub struct Snapshot {
     pub client: Option<ClientView>,
