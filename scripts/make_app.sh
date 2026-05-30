@@ -51,12 +51,14 @@ fi
 # If Terminal is launched fresh, it auto-opens one empty window — running
 # `do script` then would leave TWO windows (the empty one + ours). So we detect
 # whether Terminal was already running: if not, reuse the window the activation
-# just created (`do script ... in window 1`); if yes, open a new window. Both
-# branches return the tab so we can set its title/size. Quote both paths.
-# The shell command: clear screen AND scrollback (printf '\033[3J' = ESC[3J,
-# the only thing that wipes macOS Terminal's scrollback) before exec, so there's
-# nothing to scroll back to behind the dashboard.
-CMD="printf '\\033[2J\\033[3J\\033[H'; cd '$WORKDIR'; exec '$BIN'"
+# just created (`do script ... in window 1`); if yes, open a new window.
+#
+# The shell command just runs `clear; cd; exec`. We do NOT inline escape
+# sequences here: backslashes in the string break AppleScript's parser (the
+# whole `do script` then fails to compile and nothing opens). The dashboard
+# itself purges the scrollback on startup (draw::enter_screen emits ESC[3J via
+# Clear(Purge)), so a plain `clear` here is enough.
+CMD="clear; cd '$WORKDIR'; exec '$BIN'"
 osascript <<APPLESCRIPT
 tell application "Terminal"
     set wasRunning to running
