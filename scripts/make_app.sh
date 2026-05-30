@@ -53,15 +53,19 @@ fi
 # whether Terminal was already running: if not, reuse the window the activation
 # just created (`do script ... in window 1`); if yes, open a new window. Both
 # branches return the tab so we can set its title/size. Quote both paths.
+# The shell command: clear screen AND scrollback (printf '\033[3J' = ESC[3J,
+# the only thing that wipes macOS Terminal's scrollback) before exec, so there's
+# nothing to scroll back to behind the dashboard.
+CMD="printf '\\033[2J\\033[3J\\033[H'; cd '$WORKDIR'; exec '$BIN'"
 osascript <<APPLESCRIPT
 tell application "Terminal"
     set wasRunning to running
     activate
     if wasRunning then
-        do script "clear; cd '$WORKDIR'; exec '$BIN'"
+        do script "$CMD"
     else
         -- reuse the empty window Terminal just opened on launch
-        do script "clear; cd '$WORKDIR'; exec '$BIN'" in window 1
+        do script "$CMD" in window 1
     end if
     set custom title of front window to "RatioUp"
     set number of columns of front window to 110
