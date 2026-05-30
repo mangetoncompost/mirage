@@ -403,6 +403,18 @@ pub fn build_frame(f: &Frame, width: u16, view: View, sel: usize) -> String {
         View::Config => build_cfg(&c, &b, inner, &mut out, &line, &rule),
     }
 
+    // ---- fill to the window bottom ------------------------------------------
+    // Every view pads with blank bordered rows so the footer + bottom border
+    // always anchor to the last terminal row (no empty rows below the box). The
+    // footer below is 3 rows (rule + totals + bottom border).
+    {
+        let emitted = out.matches("\r\n").count();
+        let target = f.term_h.saturating_sub(3);
+        for _ in emitted..target {
+            line(&mut out, "", 0);
+        }
+    }
+
     // ---- footer -------------------------------------------------------------
     {
         out.push_str(&c_dim(&c));
@@ -580,16 +592,14 @@ fn build_dash(
     }
 
     // ---- feed pane ----------------------------------------------------------
+    // The "recent" box extends to the window bottom: render events, then the
+    // global fill in build_frame pads the rest as blank bordered rows.
     rule_line(out, c, b, rule, Some("recent"));
     for ev in f.feed.iter() {
         let (content, vis) = render_event_row(ev, c, inner);
         line(out, &content, vis);
     }
-    // Pad the pane with blank rows so the footer bottom-anchors to the window
-    // (no empty terminal rows below the board when there are few events).
-    for _ in f.feed.len()..f.feed_cap {
-        line(out, "", 0);
-    }
+    let _ = f.feed_cap;
 }
 
 /// Emit a content row, optionally with a selection marker (reverse-video-ish

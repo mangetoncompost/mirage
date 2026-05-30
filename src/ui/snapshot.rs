@@ -62,6 +62,9 @@ pub struct Frame {
     /// with blank rows up to this so the box always bottom-anchors to the window
     /// (no empty terminal rows below the board).
     pub feed_cap: usize,
+    /// Terminal height in rows. Every view pads its body up to this (minus the
+    /// footer) so the box fills the whole window — no blank rows below it.
+    pub term_h: usize,
     pub spinner: usize,
 }
 

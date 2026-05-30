@@ -70,6 +70,7 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
                     rows,
                     feed: events::snapshot(feed_lines),
                     feed_cap: feed_lines,
+                    term_h: h as usize,
                     spinner,
                 };
                 let s = render::build_frame(&frame, w, active, sel); // pure, no locks/IO
