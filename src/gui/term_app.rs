@@ -11,17 +11,50 @@
 //! TERM/COLORTERM/LANG here to guarantee truecolor + UTF-8 box-drawing even when
 //! launched from a bundle (which has a minimal env).
 
+use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
-use egui_term::{BackendSettings, PtyEvent, TerminalBackend, TerminalView};
+use egui_term::{
+    BackendSettings, FontSettings, PtyEvent, TerminalBackend, TerminalFont, TerminalView,
+};
+
+/// Bundled monospace font with full Box-Drawing / Block-Elements / arrow
+/// coverage (JetBrains Mono Nerd Font, OFL). egui's default monospace renders
+/// some of these as thin/tofu glyphs; this guarantees the dashboard's borders
+/// (╭ ─ ┤ │ █ ░ ↑) look like a real terminal.
+const TERM_FONT_NAME: &str = "ratioup-mono";
+const TERM_FONT_BYTES: &[u8] =
+    include_bytes!("../../assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf");
+
+const FONT_SIZE: f32 = 14.0;
+
+/// Register the bundled font as the egui Monospace family (egui_term draws with
+/// `FontId::monospace`, so this is what the terminal will use).
+fn install_font(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        TERM_FONT_NAME.to_owned(),
+        Arc::new(egui::FontData::from_static(TERM_FONT_BYTES)),
+    );
+    // Front of the Monospace fallback chain so our glyphs win.
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .insert(0, TERM_FONT_NAME.to_owned());
+    ctx.set_fonts(fonts);
+}
 
 pub struct TermApp {
     backend: TerminalBackend,
     pty_rx: Receiver<(u64, PtyEvent)>,
+    font: TerminalFont,
 }
 
 impl TermApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        install_font(&cc.egui_ctx);
+
         // The child inherits our env; force a capable terminal profile so colors
         // and box-drawing render identically to the user's own terminal.
         // SAFETY: set before the PTY child is spawned; single-threaded at this
@@ -54,7 +87,15 @@ impl TermApp {
         )
         .expect("spawn embedded terminal");
 
-        Self { backend, pty_rx }
+        let font = TerminalFont::new(FontSettings {
+            font_type: egui::FontId::new(FONT_SIZE, egui::FontFamily::Monospace),
+        });
+
+        Self {
+            backend,
+            pty_rx,
+            font,
+        }
     }
 }
 
@@ -69,6 +110,7 @@ impl eframe::App for TermApp {
 
         let term = TerminalView::new(ui, &mut self.backend)
             .set_focus(true)
+            .set_font(self.font.clone())
             .set_size(ui.available_size());
         ui.add(term);
     }

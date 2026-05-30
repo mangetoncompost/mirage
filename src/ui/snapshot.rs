@@ -58,6 +58,10 @@ pub struct Frame {
     pub now: chrono::DateTime<chrono::Utc>,
     pub rows: Vec<TorrentView>,
     pub feed: Vec<UiEvent>,
+    /// How many rows the feed pane should occupy. The dashboard pads the pane
+    /// with blank rows up to this so the box always bottom-anchors to the window
+    /// (no empty terminal rows below the board).
+    pub feed_cap: usize,
     pub spinner: usize,
 }
 

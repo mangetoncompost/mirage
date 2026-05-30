@@ -15,8 +15,8 @@ pub fn run() {
     // child so it re-flows, exactly like a real terminal.
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([820.0, 520.0])
-            .with_min_inner_size([560.0, 360.0])
+            .with_inner_size([860.0, 560.0])
+            .with_min_inner_size([620.0, 380.0])
             .with_title("RatioUp"),
         ..Default::default()
     };
