@@ -4,6 +4,7 @@
 //! reads `control::SNAPSHOT` each frame and sends `control::Cmd`s for mutations.
 
 mod app;
+mod term;
 mod theme;
 mod views;
 
