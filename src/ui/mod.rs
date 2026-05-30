@@ -9,7 +9,9 @@
 
 pub mod draw;
 mod events;
+mod history;
 pub mod keys;
+pub mod overlay;
 mod render;
 mod snapshot;
 pub mod view;
@@ -66,23 +68,59 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
         match active {
             View::Dashboard | View::Torrents | View::Trackers => view::clamp_sel(rows.len()),
             View::Speeds => view::clamp_sel(6),
+            // Ratio, Schedule, Network, Logs, Config, Client have no selectable list.
             _ => {}
         }
         let sel = view::sel();
         let feed_lines = render::feed_capacity(h, rows.len(), 12);
+        let started = *crate::STARTED
+            .get()
+            .expect("STARTED set in main before UI spawn");
+        let now = chrono::Utc::now();
+
+        // Time-series sample for the history widgets: summed upload + summed
+        // instantaneous speed across the (already-snapshotted) rows. Pushed once
+        // per tick under the lock-light history ring — same discipline as
+        // set_rows above, and never touched from build_frame or the key thread.
+        let total_up: u64 = rows.iter().map(|r| r.uploaded).sum();
+        let row_peak: u64 = rows.iter().map(|r| r.up_speed as u64).max().unwrap_or(0);
+        let secs = (now - started).num_seconds().max(0);
+        history::push_sample(secs, total_up, row_peak);
+
+        // Resolve the active overlay (Help / Palette / Detail / None) here so
+        // build_frame stays pure — it never reads the overlay atomics itself.
+        let active_overlay = overlay::active();
+
+        // Milestone celebration (F1.3): ratio = total_up / total_seeding_length.
+        // Only seeding torrents contribute to the denominator — downloading ones
+        // haven't finished yet and their partial length would deflate the ratio.
+        let total_seeding_len: u64 = rows
+            .iter()
+            .filter(|r| !r.downloading && !r.busy)
+            .map(|r| r.length)
+            .sum();
+        let celebrate = overlay::check_milestone(total_up, total_seeding_len, spinner as u64);
+        if celebrate {
+            crate::ui::emit(crate::ui::EventKind::Milestone, "session", overlay::celebration_label());
+        }
+        let celebrate_label = overlay::celebration_label();
+
         let frame = Frame {
             client: snapshot_client().await,
-            started: *crate::STARTED
-                .get()
-                .expect("STARTED set in main before UI spawn"),
-            now: chrono::Utc::now(),
+            started,
+            now,
             rows,
             feed: events::snapshot(feed_lines),
             feed_cap: feed_lines,
             term_h: h as usize,
             spinner,
+            up_history: history::samples(),
+            frame_peak_speed: history::session_peak(),
+            celebrate: overlay::celebrating(spinner as u64),
+            celebrate_label,
+            marked: view::marked_set(),
         };
-        let s = render::build_frame(&frame, w, active, sel); // pure, no locks/IO
+        let s = render::build_frame(&frame, w, active, sel, active_overlay); // pure, no locks/IO
         draw::paint(&s);
     }
 

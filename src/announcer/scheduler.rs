@@ -78,6 +78,7 @@ pub async fn run(wait_time: u64) {
                     // on the call that finishes the download).
                     // Compute dl_interval once so both the tick-gate and the
                     // sleep-target use the same jitter-sampled value.
+                    t.schedule_reason = crate::torrent::ScheduleReason::DownloadTick as u8;
                     let di = dl_interval(&t);
                     if elapsed >= di {
                         let completed_now = t.advance_download();

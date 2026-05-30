@@ -54,6 +54,25 @@ pub fn percent_encoding(input: &[u8]) -> String {
     encoded_string
 }
 
+/// Base64-encode `input` (RFC 4648 standard alphabet, with padding). Used for
+/// OSC-52 clipboard export (F2.3). No new crate — the alphabet is tiny and the
+/// operation is one-shot, so a local 30-line impl keeps the zero-new-crate invariant.
+pub fn base64_encode(input: &[u8]) -> String {
+    const ALPHA: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let combined = (b0 << 16) | (b1 << 8) | b2;
+        out.push(ALPHA[((combined >> 18) & 0x3f) as usize] as char);
+        out.push(ALPHA[((combined >> 12) & 0x3f) as usize] as char);
+        out.push(if chunk.len() > 1 { ALPHA[((combined >> 6) & 0x3f) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { ALPHA[(combined & 0x3f) as usize] as char } else { '=' });
+    }
+    out
+}
+
 pub fn get_sha1(input: &[u8]) -> [u8; 20] {
     let mut m = sha1_smol::Sha1::new();
     m.update(input);

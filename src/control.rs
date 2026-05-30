@@ -56,4 +56,14 @@ pub enum Cmd {
     ReinitClient,
     /// Persist the current config to config.toml.
     SaveConfig,
+    /// Export a snapshot of the live session to a timestamped JSON file (and,
+    /// best-effort, the system clipboard via OSC-52). Applied in the engine so
+    /// the per-torrent locks are taken on the engine task, never the UI thread.
+    #[allow(dead_code)]
+    ExportSnapshot,
+    /// Set (or clear, with `None`) a per-torrent uploaded-bytes goal. Once
+    /// `uploaded` reaches the target the torrent stops declaring upload — a
+    /// hard ratio cap the tracker never sees exceeded.
+    #[allow(dead_code)]
+    SetRatioTarget([u8; 20], Option<u64>),
 }

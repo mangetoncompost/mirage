@@ -119,6 +119,10 @@ fn shorten_interval(t: &mut Torrent, lo: u64, hi: u64) -> u64 {
 /// upload yet, fall through to the no-leecher re-check below. Returns the wait.
 pub fn apply_warmup(t: &mut Torrent) -> u64 {
     if t.can_upload() {
+        // Stamp the cadence reason at the real decision point (not in the
+        // scheduler branch), so a row freshly STARTED or retried is labelled
+        // correctly in the Schedule ledger (F3.3).
+        t.schedule_reason = crate::torrent::ScheduleReason::Warmup as u8;
         shorten_interval(t, WARMUP_MIN_SECS, WARMUP_MAX_SECS)
     } else {
         apply_recheck(t)
@@ -132,8 +136,11 @@ pub fn apply_warmup(t: &mut Torrent) -> u64 {
 /// we must NOT keep hammering at warm-up speed, which risks a ban). Returns wait.
 pub fn apply_recheck(t: &mut Torrent) -> u64 {
     if !t.can_upload() && (t.seeders > 0 || t.leechers > 0) {
+        t.schedule_reason = crate::torrent::ScheduleReason::Recheck as u8;
         shorten_interval(t, RECHECK_NO_LEECHER_MIN_SECS, RECHECK_NO_LEECHER_MAX_SECS)
     } else {
+        // Normal tracker rhythm: uploading fine, or no swarm to chase.
+        t.schedule_reason = crate::torrent::ScheduleReason::Interval as u8;
         t.interval
     }
 }
