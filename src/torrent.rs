@@ -160,6 +160,48 @@ pub struct Torrent {
     /// announce gets a successful tracker response. Lets us RETRY `completed` on a
     /// failed announce while never double-sending it after success.
     pub completed_sent: bool,
+    /// Optional cap on declared uploaded bytes (F2.2). When `uploaded >= target`,
+    /// `can_upload()` returns false and the torrent is silently capped — the
+    /// tracker never sees more than the goal. Persisted in state.json v2.
+    /// `None` = no cap (unlimited).
+    pub upload_target: Option<u64>,
+    /// Transient (NOT persisted; init 0). Why the current announce cadence is
+    /// what it is, stamped by the scheduler under the lock it already holds and
+    /// surfaced by the Schedule ledger (F3.3). See [`ScheduleReason`].
+    /// 0 = interval, 1 = warm-up, 2 = re-check, 3 = download-tick.
+    pub schedule_reason: u8,
+}
+
+/// Cadence-reason codes stamped on [`Torrent::schedule_reason`]. Kept as a `u8`
+/// on the struct (not an enum field) so it stays `Eq`/`Clone` with zero cost and
+/// is trivially copied into the POD snapshot; this maps codes to labels.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ScheduleReason {
+    Interval = 0,
+    Warmup = 1,
+    Recheck = 2,
+    DownloadTick = 3,
+}
+
+impl ScheduleReason {
+    /// Map a stored `u8` back to a reason (unknown codes fall back to Interval).
+    pub fn from_u8(v: u8) -> ScheduleReason {
+        match v {
+            1 => ScheduleReason::Warmup,
+            2 => ScheduleReason::Recheck,
+            3 => ScheduleReason::DownloadTick,
+            _ => ScheduleReason::Interval,
+        }
+    }
+    /// Short label for the ledger column.
+    pub fn label(self) -> &'static str {
+        match self {
+            ScheduleReason::Interval => "interval",
+            ScheduleReason::Warmup => "warm-up",
+            ScheduleReason::Recheck => "re-check",
+            ScheduleReason::DownloadTick => "dl-tick",
+        }
+    }
 }
 
 /// Oscillation periods (seconds) and their amplitude weights for the fake
@@ -207,9 +249,25 @@ impl Torrent {
     /// integrate early-return 0 when !can_upload(), so a Downloading torrent
     /// declares uploaded=0 everywhere automatically.
     pub fn can_upload(&self) -> bool {
-        !crate::control::is_paused()
-            && self.is_seeding()
-            && ((self.seeders > 0 && self.leechers > 0) || self.leechers > 1)
+        if crate::control::is_paused() {
+            return false;
+        }
+        if !self.is_seeding() {
+            return false;
+        }
+        // F2.2 ratio cap: if a target was set and already met, stop uploading.
+        if let Some(target) = self.upload_target {
+            if self.uploaded >= target {
+                return false;
+            }
+        }
+        (self.seeders > 0 && self.leechers > 0) || self.leechers > 1
+    }
+
+    /// Set or clear the per-torrent upload target (F2.2). Called from the engine
+    /// on Cmd::SetRatioTarget, under the torrent's own Mutex (never under TORRENTS).
+    pub fn set_upload_target(&mut self, target: Option<u64>) {
+        self.upload_target = target;
     }
 
     /// Draw the per-torrent simulated download rate (bytes/s, >= 1) from config.
@@ -617,6 +675,8 @@ impl Torrent {
             dl_rate: Self::pick_dl_rate(),
             dl_last_tick: Instant::now(),
             completed_sent: false,
+            upload_target: None,
+            schedule_reason: 0,
         })
     }
 }
@@ -652,6 +712,8 @@ mod tests {
             dl_rate: rate.max(1),
             dl_last_tick: std::time::Instant::now(),
             completed_sent: false,
+            upload_target: None,
+            schedule_reason: 0,
         }
     }
 
@@ -739,6 +801,8 @@ mod tests {
             dl_rate: 1_048_576,
             dl_last_tick: std::time::Instant::now(),
             completed_sent: false,
+            upload_target: None,
+            schedule_reason: 0,
         };
         assert!(t.can_upload());
 
@@ -805,6 +869,8 @@ mod tests {
             dl_rate: 1_048_576,
             dl_last_tick: std::time::Instant::now(),
             completed_sent: false,
+            upload_target: None,
+            schedule_reason: 0,
         };
         assert!(!t.can_upload());
         t.leechers = 5;
@@ -843,6 +909,8 @@ mod tests {
             dl_rate: 1_048_576,
             dl_last_tick: std::time::Instant::now(),
             completed_sent: false,
+            upload_target: None,
+            schedule_reason: 0,
         };
         let speed = t.uploaded(16, 64);
         assert!(speed > 0);

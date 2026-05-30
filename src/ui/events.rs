@@ -23,6 +23,9 @@ pub enum EventKind {
     Added,        // torrent added by watcher
     Removed,      // torrent removed by watcher
     Error,        // tracker failure_reason / bad response / transport error
+    Exported,     // session snapshot written to a JSON file (F2.3)
+    GoalReached,  // per-torrent upload target hit; upload auto-capped (F2.2)
+    Milestone,    // a ratio milestone was crossed (F1.3 celebration)
 }
 
 impl EventKind {
@@ -43,6 +46,9 @@ impl EventKind {
             EventKind::Added => "+",
             EventKind::Removed => "-",
             EventKind::Error => "▲",
+            EventKind::Exported => "⇩",
+            EventKind::GoalReached => "✔",
+            EventKind::Milestone => "★",
         }
     }
 
@@ -57,6 +63,9 @@ impl EventKind {
             EventKind::Added => "+",
             EventKind::Removed => "-",
             EventKind::Error => "!",
+            EventKind::Exported => "v",
+            EventKind::GoalReached => "*",
+            EventKind::Milestone => "*",
         }
     }
 }
@@ -116,6 +125,9 @@ mod tests {
             EventKind::Added,
             EventKind::Removed,
             EventKind::Error,
+            EventKind::Exported,
+            EventKind::GoalReached,
+            EventKind::Milestone,
         ];
         for k in kinds {
             emit(k, "t", "m");

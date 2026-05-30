@@ -68,6 +68,24 @@ pub(crate) async fn process_commands(
             Cmd::SaveConfig => {
                 save_config_toml().await;
             }
+            Cmd::ExportSnapshot => {
+                export_snapshot().await;
+            }
+            Cmd::SetRatioTarget(hash, target) => {
+                let handles: Vec<_> = crate::TORRENTS.read().await.clone();
+                for m in handles.iter() {
+                    let mut t = m.lock().await;
+                    if t.info_hash == hash {
+                        t.set_upload_target(target);
+                        let msg = match target {
+                            Some(b) => format!("cap → {}", crate::utils::format_bytes_u64(b)),
+                            None => "cap cleared".to_string(),
+                        };
+                        crate::ui::emit(crate::ui::EventKind::ConnectOk, &t.name, msg);
+                        break;
+                    }
+                }
+            }
         }
     }
 }
@@ -157,5 +175,66 @@ async fn save_config_toml() {
                 format!("saved to {}", path.display()),
             );
         }
+    }
+}
+
+/// Serialize the live session to a timestamped JSON file and queue an OSC-52
+/// clipboard payload so the user can paste the path (F2.3).
+///
+/// Uses the same manual JSON builder as [`crate::json_output`] and the same
+/// temp+rename write safety as [`crate::state`]. The clipboard gets the file
+/// path (not the full JSON — OSC-52 has terminal-dependent size limits).
+async fn export_snapshot() {
+    let started = match crate::STARTED.get() {
+        Some(s) => *s,
+        None => return,
+    };
+    let mut json = String::with_capacity(4096);
+    json.push_str("{\"started\":\"");
+    json.push_str(&started.to_rfc3339());
+    json.push_str("\",\"client\":\"");
+    if let Some(cl) = &*crate::CLIENT.read().await {
+        json.push_str(&cl.name);
+    }
+    json.push_str("\",\"torrents\":[\n");
+    let handles: Vec<_> = crate::TORRENTS.read().await.clone();
+    let mut total_up: u64 = 0;
+    let mut first = true;
+    for m in &handles {
+        let t = m.lock().await;
+        if !first {
+            json.push(',');
+        }
+        first = false;
+        total_up += t.uploaded;
+        json.push_str(&t.to_json());
+    }
+    json.push_str("\n],\"total_uploaded\":");
+    json.push_str(&total_up.to_string());
+    json.push('}');
+
+    let now_str = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
+    let filename = format!("mirage-{now_str}.json");
+    let tmp = format!("{filename}.tmp");
+    let written = if let Err(e) = tokio::fs::write(&tmp, json.as_bytes()).await {
+        tracing::warn!("ExportSnapshot: write {tmp}: {e}");
+        false
+    } else {
+        match tokio::fs::rename(&tmp, &filename).await {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::warn!("ExportSnapshot: rename {tmp} → {filename}: {e}");
+                false
+            }
+        }
+    };
+
+    if written {
+        let b64 = crate::utils::base64_encode(filename.as_bytes());
+        crate::ui::draw::queue_clipboard(b64);
+        crate::ui::emit(crate::ui::EventKind::Exported, "export", format!("→ {filename}"));
+        info!("snapshot exported to {filename}");
+    } else {
+        crate::ui::emit(crate::ui::EventKind::Error, "export", "write failed — check logs");
     }
 }

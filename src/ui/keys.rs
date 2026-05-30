@@ -42,10 +42,46 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                 use crate::control::{self, Cmd};
                 use crate::ui::view::{self, View};
                 let active = view::active_view();
+                use crate::ui::overlay;
+
+                // INFRA-C: palette capture mode — when the palette is open,
+                // route printable chars / Backspace / arrows / Enter / Esc
+                // to the palette buffer BEFORE the normal keymap.
+                if overlay::palette_open() {
+                    match (code, modifiers) {
+                        (KeyCode::Esc, _) | (KeyCode::Char('q'), _) => {
+                            overlay::close_palette();
+                        }
+                        (KeyCode::Backspace, _) => {
+                            overlay::palette_pop();
+                        }
+                        (KeyCode::Up, _) => {
+                            overlay::palette_bump_sel(-1, crate::ui::render::palette_match_count());
+                        }
+                        (KeyCode::Down, _) => {
+                            overlay::palette_bump_sel(1, crate::ui::render::palette_match_count());
+                        }
+                        (KeyCode::Enter, _) => {
+                            let sel = overlay::PALETTE_SEL.load(std::sync::atomic::Ordering::Relaxed);
+                            crate::ui::render::execute_palette_item(sel, view::selected_hash());
+                            overlay::close_palette();
+                        }
+                        (KeyCode::Char(ch), KeyModifiers::NONE)
+                        | (KeyCode::Char(ch), KeyModifiers::SHIFT) => {
+                            overlay::palette_push(ch);
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
                 match (code, modifiers) {
-                    // 1-9 switch the active tab.
+                    // 1-9 switch the active tab; 0 → Ratio (10th tab).
                     (KeyCode::Char(d @ '1'..='9'), _) => {
                         view::set_view(d as usize - '1' as usize);
+                    }
+                    (KeyCode::Char('0'), _) => {
+                        view::set_view(9); // View::Ratio
                     }
                     // Arrows: on the list views walk the selection; elsewhere keep
                     // the long-standing global speed bump (muscle memory).
@@ -75,7 +111,28 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                     (KeyCode::Char('+' | '='), _) => speed_edit(active, 1),
                     (KeyCode::Char('-' | '_'), _) => speed_edit(active, -1),
                     // Toggle the help overlay.
-                    (KeyCode::Char('?'), _) => view::toggle_help(),
+                    (KeyCode::Char('?'), _) => overlay::toggle_help(),
+                    // Open the command palette (F3.1).
+                    (KeyCode::Char(':'), _) => overlay::open_palette(),
+                    // Enter opens the per-torrent detail card on list views.
+                    (KeyCode::Enter, _) if is_list_view(active) => {
+                        if let Some(h) = view::selected_hash() {
+                            overlay::open_detail(h);
+                        }
+                    }
+                    // Sub-tab switching inside the detail overlay.
+                    (KeyCode::Char('i'), _) if overlay::detail_open() => {
+                        crate::ui::overlay::DETAIL_SUB
+                            .store(0, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    (KeyCode::Char('w'), _) if overlay::detail_open() => {
+                        crate::ui::overlay::DETAIL_SUB
+                            .store(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    // e → export snapshot (F2.3).
+                    (KeyCode::Char('e'), _) => {
+                        control::send(Cmd::ExportSnapshot);
+                    }
                     // Pause / resume are GLOBAL (per-torrent pause isn't modeled
                     // in the engine): p toggles, r force-resumes.
                     (KeyCode::Char('p'), _) => {
@@ -84,34 +141,47 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                     (KeyCode::Char('r'), _) => {
                         control::set_paused(false);
                     }
-                    // Force announce / remove act on the selected row of a list
-                    // view (Dashboard/Torrents/Trackers); selected_hash skips the
-                    // busy sentinel.
+                    // Space toggles the multi-selection mark on the current row.
+                    // `a` marks all visible rows; `A` clears all marks (F2.1).
+                    (KeyCode::Char(' '), _) if is_list_view(active) => {
+                        if let Some(h) = view::selected_hash() {
+                            view::toggle_mark(h);
+                        }
+                    }
+                    (KeyCode::Char('a'), _) if is_list_view(active) => {
+                        view::mark_all();
+                    }
+                    (KeyCode::Char('A'), _) if is_list_view(active) => {
+                        view::clear_marks();
+                    }
+                    // Force announce / remove act on the marked set (or the selected
+                    // row if no marks). Busy sentinel skipped by marked_or_selected.
                     (KeyCode::Char('f'), _) if is_list_view(active) => {
-                        match view::selected_hash() {
-                            Some(h) => control::send(Cmd::ForceAnnounce(h)),
-                            None if view::row_count() > 0 => {
-                                crate::ui::emit(
-                                    crate::ui::EventKind::Error,
-                                    "—",
-                                    "torrent busy (announcing) — try again",
-                                );
-                            }
-                            None => {}
+                        let targets = view::marked_or_selected();
+                        if targets.is_empty() && view::row_count() > 0 {
+                            crate::ui::emit(
+                                crate::ui::EventKind::Error,
+                                "—",
+                                "torrent busy (announcing) — try again",
+                            );
+                        }
+                        for h in targets {
+                            control::send(Cmd::ForceAnnounce(h));
                         }
                     }
                     (KeyCode::Char('x'), _) if is_list_view(active) => {
-                        match view::selected_hash() {
-                            Some(h) => control::send(Cmd::Remove(h)),
-                            None if view::row_count() > 0 => {
-                                crate::ui::emit(
-                                    crate::ui::EventKind::Error,
-                                    "—",
-                                    "torrent busy (announcing) — try again",
-                                );
-                            }
-                            None => {}
+                        let targets = view::marked_or_selected();
+                        if targets.is_empty() && view::row_count() > 0 {
+                            crate::ui::emit(
+                                crate::ui::EventKind::Error,
+                                "—",
+                                "torrent busy (announcing) — try again",
+                            );
                         }
+                        for h in targets {
+                            control::send(Cmd::Remove(h));
+                        }
+                        view::clear_marks();
                     }
                     (KeyCode::Char('k'), _) if active == View::Client => {
                         control::send(Cmd::ReinitClient);
@@ -119,10 +189,14 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                     (KeyCode::Char('s'), _) if active == View::Config => {
                         control::send(Cmd::SaveConfig);
                     }
-                    // Esc closes the help overlay, else returns to the Dashboard.
+                    // Esc: close any open overlay, or return to Dashboard.
                     (KeyCode::Esc, _) => {
-                        if view::help_open() {
-                            view::toggle_help();
+                        if overlay::help_open() {
+                            overlay::toggle_help();
+                        } else if overlay::palette_open() {
+                            overlay::close_palette();
+                        } else if overlay::detail_open() {
+                            overlay::close_detail();
                         } else {
                             view::set_view(0);
                         }

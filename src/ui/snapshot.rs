@@ -20,6 +20,8 @@
 //! `CLIENT` is snapshotted via `try_read()` for the same reason: a queued
 //! CLIENT writer (key-renewer or `k` re-init) must not block the render loop.
 
+use std::collections::HashSet;
+
 use crate::ui::events::UiEvent;
 
 /// POD copy of one torrent for one frame. No borrows, no locks.
@@ -31,15 +33,16 @@ pub struct TorrentView {
     pub leechers: u16,
     pub up_speed: u32, // bytes/s (next_upload_speed)
     pub uploaded: u64, // total bytes
-    #[allow(dead_code)]
-    pub length: u64, // total torrent size (bytes) — for future detail rows
+    pub length: u64, // total torrent size (bytes) — ratio denominator + detail card
     #[allow(dead_code)]
     pub left: u64, // declared bytes left (0 when seeding) — future detail
-    pub interval: u64, // current announce interval (s)
+    #[allow(dead_code)]
+    pub interval: u64, // current announce interval (s) — for the Schedule ledger / detail card
     pub secs_to_announce: u64, // interval - elapsed, saturating
     pub error_count: u16,
     pub busy: bool,        // true => mid-announce, try_lock failed (placeholder row)
     pub downloading: bool, // true => still in the simulated download phase
+    pub schedule_reason: u8, // why the current cadence (see torrent::ScheduleReason) — F3.3 ledger
     pub dl_percent: u8,    // 0..=100 download progress
     #[allow(dead_code)]
     pub downloaded: u64, // declared downloaded bytes (display interpolation)
@@ -70,6 +73,21 @@ pub struct Frame {
     /// footer) so the box fills the whole window — no blank rows below it.
     pub term_h: usize,
     pub spinner: usize,
+    /// `(seconds_since_started, cumulative_uploaded_bytes)` samples, oldest
+    /// first — copied from the lock-light history ring by `render_once`. Feeds
+    /// the cumulative-upload graph. Empty until the first tick records a sample.
+    pub up_history: Vec<(i64, u64)>,
+    /// Stable per-session peak of the fastest single-torrent upload speed
+    /// (bytes/s), used as the per-row meter bars' denominator so they don't
+    /// rescale (visually "jump") when the fastest torrent stops.
+    pub frame_peak_speed: u64,
+    /// Whether a ratio milestone was just crossed this tick (F1.3 flash).
+    pub celebrate: bool,
+    /// Label for the celebration footer line (e.g. "ratio 2.0× !").
+    pub celebrate_label: String,
+    /// The set of multi-selected torrent hashes (F2.1). POD copy snapshotted
+    /// once per tick; `build_frame` reads only this copy — never MARKED directly.
+    pub marked: HashSet<[u8; 20]>,
 }
 
 pub async fn snapshot_torrents() -> Vec<TorrentView> {
@@ -114,6 +132,7 @@ pub async fn snapshot_torrents() -> Vec<TorrentView> {
                     error_count: t.error_count,
                     busy: false,
                     downloading: !t.is_seeding(),
+                    schedule_reason: t.schedule_reason,
                     dl_percent,
                     downloaded: projected,
                     urls: t.urls.clone(),
@@ -133,6 +152,7 @@ pub async fn snapshot_torrents() -> Vec<TorrentView> {
                 error_count: 0,
                 busy: true,
                 downloading: false,
+                schedule_reason: 0,
                 dl_percent: 0,
                 downloaded: 0,
                 urls: Vec::new(),

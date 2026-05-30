@@ -19,6 +19,7 @@ use crossterm::{
     },
 };
 use std::io::{Write, stdout};
+use std::sync::Mutex;
 
 /// Enter the alternate screen, raw mode, hide the cursor, and DISABLE bracketed
 /// paste. Without the last one, pasting text into the window under raw mode
@@ -86,12 +87,37 @@ pub fn restore() {
     let _ = o.flush();
 }
 
+/// Pending OSC-52 clipboard payload (base64-encoded UTF-8). The engine's
+/// ExportSnapshot handler fills this; the next `paint()` drains it once.
+/// Using a Mutex<Option> instead of a channel keeps the drain synchronous and
+/// avoids an mpsc dependency in the draw module.
+static CLIP_PENDING: Mutex<Option<String>> = Mutex::new(None);
+
+/// Queue a clipboard payload to be sent on the next paint. `b64` must already
+/// be base64-encoded. Best-effort: if the terminal doesn't support OSC-52 (e.g.
+/// tmux without `set-clipboard on`) it silently discards the escape.
+pub fn queue_clipboard(b64: String) {
+    if let Ok(mut g) = CLIP_PENDING.lock() {
+        *g = Some(b64);
+    }
+}
+
 /// One buffered write per frame. `frame` already contains per-line clear-to-EOL,
 /// line breaks, and a trailing clear-below; we only home the cursor, write the
 /// whole string, and flush — a single syscall's worth of I/O.
+/// If a clipboard payload is queued, it is emitted once after the frame as an
+/// OSC-52 escape sequence (raw bytes, pass-through by the terminal emulator).
 pub fn paint(frame: &str) {
     let mut o = stdout();
     let _ = execute!(o, MoveTo(0, 0));
     let _ = o.write_all(frame.as_bytes());
+    // Drain the clipboard queue: emit OSC-52 once if pending.
+    if let Ok(mut g) = CLIP_PENDING.lock() {
+        if let Some(b64) = g.take() {
+            // ESC ] 52 ; c ; <base64> BEL
+            let osc = format!("\x1b]52;c;{b64}\x07");
+            let _ = o.write_all(osc.as_bytes());
+        }
+    }
     let _ = o.flush();
 }
