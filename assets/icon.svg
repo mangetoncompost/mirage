@@ -5,26 +5,23 @@
       <stop offset="100%" stop-color="#060a0f"/>
     </radialGradient>
     <filter id="glow">
-      <feGaussianBlur stdDeviation="6" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+      <feGaussianBlur stdDeviation="8" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
-    <filter id="haze" x="-5%" y="-20%" width="110%" height="140%">
-      <feTurbulence type="turbulence" baseFrequency="0.02 0.1" numOctaves="2" seed="7" result="n"/>
-      <feDisplacementMap in="SourceGraphic" in2="n" scale="5" xChannelSelector="R" yChannelSelector="G"/>
+    <filter id="glow-sm">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
 
   <rect width="512" height="512" rx="112" ry="112" fill="url(#bg)"/>
 
-  <!-- horizon line with heat haze -->
-  <g filter="url(#haze)" opacity="0.3">
-    <line x1="80" y1="380" x2="432" y2="380" stroke="#3dffa0" stroke-width="1"/>
-    <line x1="100" y1="390" x2="412" y2="390" stroke="#3dffa0" stroke-width="0.7"/>
-    <line x1="120" y1="399" x2="392" y2="399" stroke="#3dffa0" stroke-width="0.5"/>
-  </g>
+  <!-- border -->
+  <rect x="1.5" y="1.5" width="509" height="509" rx="111" ry="111"
+    fill="none" stroke="#4ec9ff" stroke-width="1.5" opacity="0.12"/>
 
-  <!-- prompt -->
-  <text x="256" y="310" font-family="'SF Mono', 'Fira Mono', monospace"
-    font-size="180" font-weight="500" fill="#3dffa0"
+  <!-- >_ -->
+  <text x="256" y="300" font-family="'SF Mono', 'Fira Mono', 'Consolas', monospace"
+    font-size="192" font-weight="600" fill="#4ec9ff"
     text-anchor="middle" filter="url(#glow)">&gt;_</text>
 </svg>
