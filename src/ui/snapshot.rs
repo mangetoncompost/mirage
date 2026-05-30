@@ -29,16 +29,16 @@ pub struct TorrentView {
     pub info_hash: [u8; 20], // for resolving SEL -> control::Cmd target
     pub seeders: u16,
     pub leechers: u16,
-    pub up_speed: u32,         // bytes/s (next_upload_speed)
-    pub uploaded: u64,         // total bytes
+    pub up_speed: u32, // bytes/s (next_upload_speed)
+    pub uploaded: u64, // total bytes
     #[allow(dead_code)]
-    pub length: u64,           // total torrent size (bytes) — for future detail rows
+    pub length: u64, // total torrent size (bytes) — for future detail rows
     #[allow(dead_code)]
-    pub left: u64,             // declared bytes left (0 when seeding) — future detail
-    pub interval: u64,         // current announce interval (s)
+    pub left: u64, // declared bytes left (0 when seeding) — future detail
+    pub interval: u64, // current announce interval (s)
     pub secs_to_announce: u64, // interval - elapsed, saturating
     pub error_count: u16,
-    pub busy: bool, // true => mid-announce, try_lock failed (placeholder row)
+    pub busy: bool,        // true => mid-announce, try_lock failed (placeholder row)
     pub downloading: bool, // true => still in the simulated download phase
     pub dl_percent: u8,    // 0..=100 download progress
     #[allow(dead_code)]
@@ -102,7 +102,10 @@ pub async fn snapshot_torrents() -> Vec<TorrentView> {
                     // Instantaneous speed off the same curve that backs the
                     // declared integral — 4 sins, synchronous, no .await. It is 0
                     // while downloading (can_upload() is false), which is correct.
-                    up_speed: t.speed_at(t.origin.elapsed().as_secs_f64()).round().min(u32::MAX as f64) as u32,
+                    up_speed: t
+                        .speed_at(t.origin.elapsed().as_secs_f64())
+                        .round()
+                        .min(u32::MAX as f64) as u32,
                     uploaded: t.uploaded,
                     length: t.length,
                     left: t.declared_left(),

@@ -293,7 +293,14 @@ pub async fn announce(torrent: &mut Torrent, event: Option<Event>) {
         for url in torrent.urls.clone() {
             debug!("\t{}", url);
             if url.to_lowercase().starts_with("udp://") {
-                crate::announcer::udp::announce_udp(&url, torrent, client, event, pre_loop_uploaded).await;
+                crate::announcer::udp::announce_udp(
+                    &url,
+                    torrent,
+                    client,
+                    event,
+                    pre_loop_uploaded,
+                )
+                .await;
             } else {
                 announce_http(&url, torrent, client, event, pre_loop_uploaded).await;
             }
@@ -395,7 +402,8 @@ async fn announce_http(
     // Inject the key as 8 uppercase hex (constant per session), like a real
     // Transmission — not the decimal `client.key.to_string()` used before.
     let key_hex = crate::config::KEY_HEX.load().as_str().to_string();
-    let (built_url, uploaded) = build_url(url, torrent, client, event, key_hex, pre_loop_uploaded).await;
+    let (built_url, uploaded) =
+        build_url(url, torrent, client, event, key_hex, pre_loop_uploaded).await;
     info!("Announce HTTP URL {built_url}");
 
     let mut request_builder = reqwest_client.get(&built_url);
@@ -558,7 +566,11 @@ async fn announce_http(
                 }
                 Err(e) => {
                     error!("Bad response with HTTP status {status}: {:?}", e);
-                    emit(EventKind::Error, &torrent.name, format!("decode (HTTP {status})"));
+                    emit(
+                        EventKind::Error,
+                        &torrent.name,
+                        format!("decode (HTTP {status})"),
+                    );
                     torrent.error_count = torrent.error_count.saturating_add(1);
                 }
             }
@@ -710,7 +722,10 @@ mod tests {
     #[test]
     fn test_leecher_parsing_robust_across_tracker_shapes() {
         // Textbook: complete + incomplete integers.
-        assert_eq!(parse_counts(b"d8:completei247e10:incompletei3e8:intervali1800ee"), (247, 3));
+        assert_eq!(
+            parse_counts(b"d8:completei247e10:incompletei3e8:intervali1800ee"),
+            (247, 3)
+        );
 
         // Private tracker that OMITS incomplete and only ships a compact peers
         // blob (3 IPv4 peers = 18 bytes). Must count the peers as leechers.
@@ -775,13 +790,19 @@ mod tests {
         let periodic = substitute_event(q, None);
         // No empty event= must remain, and the rest of the query stays intact.
         assert!(!periodic.contains("event="), "must omit event=: {periodic}");
-        assert!(periodic.contains("key={key}&numwant={numwant}"), "{periodic}");
+        assert!(
+            periodic.contains("key={key}&numwant={numwant}"),
+            "{periodic}"
+        );
 
         // event at the very end of the query.
         let q_end = "uploaded={uploaded}&numwant={numwant}&event={event}";
         let periodic_end = substitute_event(q_end, None);
         assert!(!periodic_end.contains("event="), "{periodic_end}");
-        assert!(periodic_end.ends_with("numwant={numwant}"), "{periodic_end}");
+        assert!(
+            periodic_end.ends_with("numwant={numwant}"),
+            "{periodic_end}"
+        );
 
         let stopped = substitute_event(q, Some(Event::Stopped));
         assert!(stopped.contains("event=stopped"), "{stopped}");

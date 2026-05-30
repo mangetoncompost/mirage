@@ -43,8 +43,7 @@ static TORRENTS: RwLock<Vec<Arc<Mutex<Torrent>>>> = RwLock::const_new(Vec::new()
 /// Handle of the currently-running key-renewer task. Replacing the client
 /// (`k` → ReinitClient) aborts the old renewer before spawning a new one, so we
 /// don't leak an immortal renewer task per re-init.
-static RENEWER: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>> =
-    std::sync::Mutex::new(None);
+static RENEWER: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>> = std::sync::Mutex::new(None);
 
 /// Spawn the key renewer, aborting any previous one first. Safe to call repeatedly.
 pub(crate) fn spawn_key_renewer(refresh_every: u16) {
@@ -106,14 +105,13 @@ pub(crate) fn get_config_from_xdg() -> Option<PathBuf> {
 #[tokio::main]
 async fn main() {
     //configure logger
-    let log_level = std::env::var("RUST_LOG")
-        .unwrap_or_else(|_| "trace".to_string());
+    let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "trace".to_string());
     let level = match log_level.to_lowercase().as_str() {
         "error" => tracing::Level::ERROR,
-        "warn"  => tracing::Level::WARN,
-        "info"  => tracing::Level::INFO,
+        "warn" => tracing::Level::WARN,
+        "info" => tracing::Level::INFO,
         "debug" => tracing::Level::DEBUG,
-        _       => tracing::Level::TRACE,
+        _ => tracing::Level::TRACE,
     };
     // Live dashboard on an interactive TTY; classic tracing logs otherwise.
     // In TUI mode we deliberately do NOT init the fmt subscriber so the tracing

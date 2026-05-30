@@ -28,7 +28,9 @@ pub static SPEED_STEP_IDX: AtomicUsize = AtomicUsize::new(DEFAULT_STEP);
 /// other memory published alongside it; a one-frame-late read is harmless.
 #[inline]
 pub fn speed_multiplier() -> f64 {
-    SPEED_STEPS[SPEED_STEP_IDX.load(Ordering::Relaxed).min(SPEED_STEPS.len() - 1)]
+    SPEED_STEPS[SPEED_STEP_IDX
+        .load(Ordering::Relaxed)
+        .min(SPEED_STEPS.len() - 1)]
 }
 
 /// Walk the multiplier ladder by `delta` (+1 = Up, -1 = Down), saturating at the
@@ -317,9 +319,9 @@ impl Torrent {
         let c = (max + min) * 0.5; // centre
         let h = (max - min) * 0.5; // half-range
         let mut s = c;
-        for i in 0..4 {
+        for (i, &weight) in SPEED_WEIGHTS.iter().enumerate() {
             let omega = speed_omega(self.speed_seed, i);
-            s += h * SPEED_WEIGHTS[i] * (omega * t + speed_phase(self.speed_seed, i)).sin();
+            s += h * weight * (omega * t + speed_phase(self.speed_seed, i)).sin();
         }
         debug_assert!(SPEED_WEIGHTS.iter().sum::<f64>() <= 1.0 + 1e-9);
         // Scale by the global multiplier AFTER the [min,max] rounding guard. The
@@ -334,7 +336,7 @@ impl Torrent {
     /// window length and any fractional endpoints — no history buffer, no
     /// per-step error. Returns 0 for empty/degenerate windows (and NaN).
     pub fn integrate(&self, t0: f64, t1: f64) -> f64 {
-        if !self.can_upload() || !(t1 > t0) {
+        if !self.can_upload() || t1 <= t0 {
             return 0.0;
         }
         let cfg = crate::CONFIG.load();
@@ -342,10 +344,10 @@ impl Torrent {
         let c = (max + min) * 0.5;
         let h = (max - min) * 0.5;
         let mut area = c * (t1 - t0); // mean contribution, >= 0
-        for i in 0..4 {
+        for (i, &weight) in SPEED_WEIGHTS.iter().enumerate() {
             let omega = speed_omega(self.speed_seed, i);
             let ph = speed_phase(self.speed_seed, i);
-            let amp = h * SPEED_WEIGHTS[i] / omega;
+            let amp = h * weight / omega;
             area += amp * ((omega * t0 + ph).cos() - (omega * t1 + ph).cos());
         }
         // Same global multiplier as `speed_at`, applied to the whole window. A
@@ -390,8 +392,9 @@ impl Torrent {
     // }
 
     pub fn from_file(path: PathBuf) -> Result<Self, TorrentError> {
-        let data = std::fs::read(&path)
-            .map_err(|e| TorrentError::ParseError(format!("cannot read {}: {e}", path.display())))?;
+        let data = std::fs::read(&path).map_err(|e| {
+            TorrentError::ParseError(format!("cannot read {}: {e}", path.display()))
+        })?;
         let mut torrent = Self::from_bencode_bytes(&data)?;
         torrent.source_path = Some(path);
         Ok(torrent)
@@ -658,7 +661,9 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(1100));
         let done = t.advance_download(); // ~440 bytes, not done
         assert!(!done);
-        assert!(matches!(t.dl_state, DownloadState::Downloading { downloaded } if downloaded > 0 && downloaded < 1000));
+        assert!(
+            matches!(t.dl_state, DownloadState::Downloading { downloaded } if downloaded > 0 && downloaded < 1000)
+        );
         // Force completion: a long elapsed crosses length.
         t.dl_rate = 1_000_000;
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -749,7 +754,10 @@ mod tests {
         trap *= dt;
         let exact = t.integrate(t0, t1);
         let rel_err = (exact - trap).abs() / trap.max(1.0);
-        assert!(rel_err < 1e-3, "exact={exact} trap={trap} rel_err={rel_err}");
+        assert!(
+            rel_err < 1e-3,
+            "exact={exact} trap={trap} rel_err={rel_err}"
+        );
         assert!(exact > 0.0);
 
         // (b) Bounds hold for a dense sample across many periods.

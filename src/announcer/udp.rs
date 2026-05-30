@@ -40,7 +40,7 @@ pub enum TrackerError {
     IoError(std::io::Error),
     Timeout,
     InvalidResponse,
-    TrackerError(String),
+    Error(String),
     ParseError,
 }
 
@@ -50,7 +50,7 @@ impl std::fmt::Display for TrackerError {
             TrackerError::IoError(e) => write!(f, "IO error: {}", e),
             TrackerError::Timeout => write!(f, "connection timed out"),
             TrackerError::InvalidResponse => write!(f, "invalid response from tracker"),
-            TrackerError::TrackerError(msg) => write!(f, "tracker error: {}", msg),
+            TrackerError::Error(msg) => write!(f, "tracker error: {}", msg),
             TrackerError::ParseError => write!(f, "failed to parse tracker URL"),
         }
     }
@@ -193,7 +193,7 @@ impl UdpTracker {
 
                 if action == 3 {
                     let error_msg = String::from_utf8_lossy(&buffer[8..bytes_received]);
-                    return Err(TrackerError::TrackerError(error_msg.to_string()));
+                    return Err(TrackerError::Error(error_msg.to_string()));
                 }
 
                 if action != ANNOUNCE_ACTION {
@@ -265,10 +265,16 @@ async fn resolve_tracker_addr(url: &str) -> Result<SocketAddr, TrackerError> {
         .find(|addr| addr.is_ipv4())
         .or_else(|| addrs.first())
         .copied()
-        .ok_or_else(|| TrackerError::TrackerError(format!("Could not resolve hostname: {}", host)))
+        .ok_or_else(|| TrackerError::Error(format!("Could not resolve hostname: {}", host)))
 }
 
-pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, event: Option<Event>, pre_loop_uploaded: u64) {
+pub async fn announce_udp(
+    url: &str,
+    torrent: &mut Torrent,
+    client: &Client,
+    event: Option<Event>,
+    pre_loop_uploaded: u64,
+) {
     debug!("UDP announce to {}", url);
 
     // Resolve tracker address
@@ -276,7 +282,11 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
         Ok(addr) => addr,
         Err(e) => {
             error!("Cannot resolve UDP tracker {}: {}", url, e);
-            emit(EventKind::ConnectFail, &torrent.name, format!("resolve {url}: {e}"));
+            emit(
+                EventKind::ConnectFail,
+                &torrent.name,
+                format!("resolve {url}: {e}"),
+            );
             torrent.error_count = torrent.error_count.saturating_add(1);
             return;
         }
@@ -287,7 +297,11 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
         Ok(t) => t,
         Err(e) => {
             error!("Cannot connect to UDP tracker {}: {}", url, e);
-            emit(EventKind::ConnectFail, &torrent.name, format!("connect {url}: {e}"));
+            emit(
+                EventKind::ConnectFail,
+                &torrent.name,
+                format!("connect {url}: {e}"),
+            );
             torrent.error_count = torrent.error_count.saturating_add(1);
             return;
         }
@@ -375,7 +389,11 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
         }
         Err(e) => {
             warn!("UDP announce failed for {}: {}", url, e);
-            emit(EventKind::Error, &torrent.name, format!("UDP fail {url}: {e}"));
+            emit(
+                EventKind::Error,
+                &torrent.name,
+                format!("UDP fail {url}: {e}"),
+            );
             torrent.error_count = torrent.error_count.saturating_add(1);
         }
     }

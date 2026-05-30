@@ -623,7 +623,11 @@ fn build_dash(
     }
     if n > MAX_VISIBLE_ROWS {
         let more = format!("{}(+{} more)…{}", c_dim(c), n - MAX_VISIBLE_ROWS, c.reset());
-        line(out, &more, dwidth(&format!("(+{} more)…", n - MAX_VISIBLE_ROWS)));
+        line(
+            out,
+            &more,
+            dwidth(&format!("(+{} more)…", n - MAX_VISIBLE_ROWS)),
+        );
     }
 
     // ---- feed pane ----------------------------------------------------------
@@ -644,43 +648,77 @@ fn build_help(out: &mut String, c: &Caps, inner: usize, term_h: usize, line: &Li
     let mut scratch = String::new();
     let line_s = |s: &mut String, content: &str, vis: usize| line(s, content, vis);
     let head = |s: &mut String, t: &str| {
-        line_s(s, &format!("{cy} {t}{r}", cy = c_header(c), t = t, r = c.reset()), dwidth(t) + 1);
+        line_s(
+            s,
+            &format!("{cy} {t}{r}", cy = c_header(c), t = t, r = c.reset()),
+            dwidth(t) + 1,
+        );
     };
     let row = |s: &mut String, key: &str, desc: &str| {
-        let txt = format!("   {cy}{key:<10}{r}{d}{desc}{r}", cy = c_header(c), key = key, r = c.reset(), d = c_dim(c), desc = desc);
-        line_s(s, &txt, (3 + 10 + dwidth(desc)).min(inner.saturating_sub(2)));
+        let txt = format!(
+            "   {cy}{key:<10}{r}{d}{desc}{r}",
+            cy = c_header(c),
+            key = key,
+            r = c.reset(),
+            d = c_dim(c),
+            desc = desc
+        );
+        line_s(
+            s,
+            &txt,
+            (3 + 10 + dwidth(desc)).min(inner.saturating_sub(2)),
+        );
     };
     line_s(&mut scratch, "", 0);
     head(&mut scratch, "navigation");
     row(&mut scratch, "1-9", "jump to tab");
     row(&mut scratch, "← →", "previous / next tab");
-    row(&mut scratch, "↑ ↓", "select row (or upload multiplier off the lists)");
-    row(&mut scratch, "Esc", "back to dashboard (or close this help)");
+    row(
+        &mut scratch,
+        "↑ ↓",
+        "select row (or upload multiplier off the lists)",
+    );
+    row(
+        &mut scratch,
+        "Esc",
+        "back to dashboard (or close this help)",
+    );
     line_s(&mut scratch, "", 0);
     head(&mut scratch, "actions");
     row(&mut scratch, "p", "pause / resume all uploads (global)");
     row(&mut scratch, "r", "resume all uploads");
     row(&mut scratch, "f", "force announce the selected torrent");
-    row(&mut scratch, "x", "remove the selected torrent (announces stopped)");
-    row(&mut scratch, "+ -", "edit the selected setting on the Speeds tab");
+    row(
+        &mut scratch,
+        "x",
+        "remove the selected torrent (announces stopped)",
+    );
+    row(
+        &mut scratch,
+        "+ -",
+        "edit the selected setting on the Speeds tab",
+    );
     line_s(&mut scratch, "", 0);
     head(&mut scratch, "tabs");
-    row(&mut scratch, "k", "[cli] re-init the emulated client (new key)");
+    row(
+        &mut scratch,
+        "k",
+        "[cli] re-init the emulated client (new key)",
+    );
     row(&mut scratch, "s", "[cfg] save config.toml");
     line_s(&mut scratch, "", 0);
     head(&mut scratch, "session");
     row(&mut scratch, "?", "toggle this help");
-    row(&mut scratch, "q / ^C", "quit (announces stopped, saves state)");
+    row(
+        &mut scratch,
+        "q / ^C",
+        "quit (announces stopped, saves state)",
+    );
 
     // Clip to fit: header uses 3 rows, footer uses 3 rows — body budget is the rest.
     let budget = term_h.saturating_sub(6);
-    let mut count = 0usize;
-    for segment in scratch.split_inclusive("\r\n") {
-        if count >= budget {
-            break;
-        }
+    for segment in scratch.split_inclusive("\r\n").take(budget) {
         out.push_str(segment);
-        count += 1;
     }
 }
 
@@ -733,7 +771,11 @@ fn build_tor(
     line(out, &hdr, inner.saturating_sub(2));
 
     // Cap visible rows: header(1) + rule(1) + help(1) + footer(3) = 6 fixed lines
-    let visible = f.rows.len().min(MAX_VISIBLE_ROWS).min(f.term_h.saturating_sub(6));
+    let visible = f
+        .rows
+        .len()
+        .min(MAX_VISIBLE_ROWS)
+        .min(f.term_h.saturating_sub(6));
     for (i, tv) in f.rows.iter().take(visible).enumerate() {
         let dot = dot_span(tv, c);
         let name = truncate(&tv.name, 21, c.utf8);
@@ -759,11 +801,28 @@ fn build_tor(
             up = format_bytes_u64(tv.uploaded),
         );
         let vis = 3 + 1 + 2 + dwidth(&name) + 9 + 5 + 5 + 1 + 8;
-        emit_row(out, c, inner, line, &body, vis.min(inner.saturating_sub(2)), i == sel);
+        emit_row(
+            out,
+            c,
+            inner,
+            line,
+            &body,
+            vis.min(inner.saturating_sub(2)),
+            i == sel,
+        );
     }
     if f.rows.len() > visible {
-        let more = format!("{}(+{} more)…{}", c_dim(c), f.rows.len() - visible, c.reset());
-        line(out, &more, dwidth(&format!("(+{} more)…", f.rows.len() - visible)));
+        let more = format!(
+            "{}(+{} more)…{}",
+            c_dim(c),
+            f.rows.len() - visible,
+            c.reset()
+        );
+        line(
+            out,
+            &more,
+            dwidth(&format!("(+{} more)…", f.rows.len() - visible)),
+        );
     }
 
     rule_line(out, c, b, rule, None);
@@ -773,18 +832,42 @@ fn build_tor(
         rd = c_err(c),
         r = c.reset(),
     );
-    line(out, &help, dwidth("f force   x remove   p pause all   ? help"));
+    line(
+        out,
+        &help,
+        dwidth("f force   x remove   p pause all   ? help"),
+    );
 }
 
 // ---- [3] trk : per-torrent trackers --------------------------------------
-fn build_trk(out: &mut String, f: &Frame, c: &Caps, inner: usize, sel: usize, term_h: usize, line: &Line) {
-    let hdr = format!("{d} per-torrent trackers (snapshot){r}", d = c_dim(c), r = c.reset());
+fn build_trk(
+    out: &mut String,
+    f: &Frame,
+    c: &Caps,
+    inner: usize,
+    sel: usize,
+    term_h: usize,
+    line: &Line,
+) {
+    let hdr = format!(
+        "{d} per-torrent trackers (snapshot){r}",
+        d = c_dim(c),
+        r = c.reset()
+    );
     line(out, &hdr, dwidth(" per-torrent trackers (snapshot)"));
     // header(1) + footer(3) = 4 fixed; cap same as dash
-    let visible = f.rows.len().min(MAX_VISIBLE_ROWS).min(term_h.saturating_sub(4));
+    let visible = f
+        .rows
+        .len()
+        .min(MAX_VISIBLE_ROWS)
+        .min(term_h.saturating_sub(4));
     for (i, tv) in f.rows.iter().take(visible).enumerate() {
         let dot = dot_span(tv, c);
-        let url = tv.urls.first().map(|u| u.as_str()).unwrap_or("(no tracker)");
+        let url = tv
+            .urls
+            .first()
+            .map(|u| u.as_str())
+            .unwrap_or("(no tracker)");
         let host = url
             .split("://")
             .nth(1)
@@ -804,12 +887,30 @@ fn build_trk(out: &mut String, f: &Frame, c: &Caps, inner: usize, sel: usize, te
             s = tv.seeders,
             l = tv.leechers,
         );
-        let vis = 2 + 26 + 1 + dwidth(host) + 2 + dwidth(&format!("S{} L{}", tv.seeders, tv.leechers));
-        emit_row(out, c, inner, line, &body, vis.min(inner.saturating_sub(2)), i == sel);
+        let vis =
+            2 + 26 + 1 + dwidth(host) + 2 + dwidth(&format!("S{} L{}", tv.seeders, tv.leechers));
+        emit_row(
+            out,
+            c,
+            inner,
+            line,
+            &body,
+            vis.min(inner.saturating_sub(2)),
+            i == sel,
+        );
     }
     if f.rows.len() > visible {
-        let more = format!("{}(+{} more)…{}", c_dim(c), f.rows.len() - visible, c.reset());
-        line(out, &more, dwidth(&format!("(+{} more)…", f.rows.len() - visible)));
+        let more = format!(
+            "{}(+{} more)…{}",
+            c_dim(c),
+            f.rows.len() - visible,
+            c.reset()
+        );
+        line(
+            out,
+            &more,
+            dwidth(&format!("(+{} more)…", f.rows.len() - visible)),
+        );
     }
 }
 
@@ -840,19 +941,59 @@ fn build_spd(
         );
         let mut vis = 1 + 14 + 1 + 2 + 13 + 1;
         if on && arrows {
-            txt.push_str(&format!("{cy}  +/- edit{r}", cy = c_header(c), r = c.reset()));
+            txt.push_str(&format!(
+                "{cy}  +/- edit{r}",
+                cy = c_header(c),
+                r = c.reset()
+            ));
             vis += dwidth("  +/- edit");
         }
         line(out, &txt, vis.min(inner.saturating_sub(2)));
     };
     rule_line(out, c, b, rule, Some("upload band"));
-    setting(out, 0, "min upload", &format!("{}/s", format_bytes(cfg.min_upload_rate)), true);
-    setting(out, 1, "max upload", &format!("{}/s", format_bytes(cfg.max_upload_rate)), true);
-    setting(out, 2, "multiplier", &format!("x{:.2}", crate::torrent::speed_multiplier()), true);
+    setting(
+        out,
+        0,
+        "min upload",
+        &format!("{}/s", format_bytes(cfg.min_upload_rate)),
+        true,
+    );
+    setting(
+        out,
+        1,
+        "max upload",
+        &format!("{}/s", format_bytes(cfg.max_upload_rate)),
+        true,
+    );
+    setting(
+        out,
+        2,
+        "multiplier",
+        &format!("x{:.2}", crate::torrent::speed_multiplier()),
+        true,
+    );
     rule_line(out, c, b, rule, Some("download phase"));
-    setting(out, 3, "min download", &format!("{}/s", format_bytes(cfg.min_download_rate)), true);
-    setting(out, 4, "max download", &format!("{}/s", format_bytes(cfg.max_download_rate)), true);
-    setting(out, 5, "numwant", &cfg.numwant.unwrap_or(80).to_string(), true);
+    setting(
+        out,
+        3,
+        "min download",
+        &format!("{}/s", format_bytes(cfg.min_download_rate)),
+        true,
+    );
+    setting(
+        out,
+        4,
+        "max download",
+        &format!("{}/s", format_bytes(cfg.max_download_rate)),
+        true,
+    );
+    setting(
+        out,
+        5,
+        "numwant",
+        &cfg.numwant.unwrap_or(80).to_string(),
+        true,
+    );
     rule_line(out, c, b, rule, Some("total upload (live)"));
     let total_up: u64 = f.rows.iter().map(|t| t.uploaded).sum();
     let total_speed: u32 = f.rows.iter().map(|t| t.up_speed).sum();
@@ -865,7 +1006,11 @@ fn build_spd(
         ok = c_ok(c),
         tot = format_bytes_u64(total_up),
     );
-    let vis = dwidth(&format!("  up {}/s   Σ {}", format_bytes(total_speed), format_bytes_u64(total_up)));
+    let vis = dwidth(&format!(
+        "  up {}/s   Σ {}",
+        format_bytes(total_speed),
+        format_bytes_u64(total_up)
+    ));
     line(out, &txt, vis.min(inner.saturating_sub(2)));
 }
 
@@ -881,11 +1026,35 @@ fn build_cli(
 ) {
     let cfg = crate::CONFIG.load();
     if let Some(cl) = &f.client {
-        kv_row(out, c, inner, line, "client", &cl.name, &c.reset().to_string());
+        kv_row(
+            out,
+            c,
+            inner,
+            line,
+            "client",
+            &cl.name,
+            c.reset(),
+        );
         kv_row(out, c, inner, line, "peer_id", &cl.peer_id, &c_dim(c));
         kv_row(out, c, inner, line, "user-agent", &cl.user_agent, &c_dim(c));
-        kv_row(out, c, inner, line, "key", &format!("{:#010x}", cl.key), &c_dim(c));
-        kv_row(out, c, inner, line, "download phase", "on (leech → completed → seed)", &c_ok(c));
+        kv_row(
+            out,
+            c,
+            inner,
+            line,
+            "key",
+            &format!("{:#010x}", cl.key),
+            &c_dim(c),
+        );
+        kv_row(
+            out,
+            c,
+            inner,
+            line,
+            "download phase",
+            "on (leech → completed → seed)",
+            &c_ok(c),
+        );
         rule_line(out, c, b, rule, Some("what the tracker sees"));
         let get = format!(
             "{d} GET /announce?peer_id={pid}&numwant={nw}&key={key:#010x}&event=started{r}",
@@ -896,10 +1065,19 @@ fn build_cli(
             r = c.reset(),
         );
         line(out, &get, inner.saturating_sub(2));
-        let help = format!("{cy} k {r}{d}re-init client (new key){r}", cy = c_header(c), d = c_dim(c), r = c.reset());
+        let help = format!(
+            "{cy} k {r}{d}re-init client (new key){r}",
+            cy = c_header(c),
+            d = c_dim(c),
+            r = c.reset()
+        );
         line(out, &help, dwidth(" k re-init client (new key)"));
     } else {
-        line(out, &format!("{}waiting for client…{}", c_dim(c), c.reset()), dwidth("waiting for client…"));
+        line(
+            out,
+            &format!("{}waiting for client…{}", c_dim(c), c.reset()),
+            dwidth("waiting for client…"),
+        );
     }
 }
 
@@ -907,7 +1085,11 @@ fn build_cli(
 fn build_sch(out: &mut String, _f: &Frame, c: &Caps, inner: usize, line: &Line) {
     line(
         out,
-        &format!("{d} seed mode    always  (night/custom: roadmap){r}", d = c_dim(c), r = c.reset()),
+        &format!(
+            "{d} seed mode    always  (night/custom: roadmap){r}",
+            d = c_dim(c),
+            r = c.reset()
+        ),
         dwidth(" seed mode    always  (night/custom: roadmap)"),
     );
     let paused = crate::control::is_paused();
@@ -922,17 +1104,51 @@ fn build_sch(out: &mut String, _f: &Frame, c: &Caps, inner: usize, line: &Line) 
         r = c.reset(),
         state = state,
     );
-    let vis = dwidth(" global       ") + dwidth(if paused { "[ ] paused" } else { "[x] running" }) + dwidth("   (p to toggle)");
+    let vis = dwidth(" global       ")
+        + dwidth(if paused { "[ ] paused" } else { "[x] running" })
+        + dwidth("   (p to toggle)");
     line(out, &txt, vis.min(inner.saturating_sub(2)));
 }
 
 // ---- [7] net : network settings -------------------------------------------
 fn build_net(c: &Caps, inner: usize, out: &mut String, line: &Line) {
     let cfg = crate::CONFIG.load();
-    kv_row(out, c, inner, line, "port", &cfg.port.to_string(), &c_warn(c));
-    kv_row(out, c, inner, line, "numwant", &cfg.numwant.unwrap_or(80).to_string(), &c_warn(c));
-    kv_row(out, c, inner, line, "torrent dir", &cfg.torrent_dir.display().to_string(), &c_dim(c));
-    kv_row(out, c, inner, line, "pid file", if cfg.use_pid_file { "on" } else { "off" }, &c_dim(c));
+    kv_row(
+        out,
+        c,
+        inner,
+        line,
+        "port",
+        &cfg.port.to_string(),
+        &c_warn(c),
+    );
+    kv_row(
+        out,
+        c,
+        inner,
+        line,
+        "numwant",
+        &cfg.numwant.unwrap_or(80).to_string(),
+        &c_warn(c),
+    );
+    kv_row(
+        out,
+        c,
+        inner,
+        line,
+        "torrent dir",
+        &cfg.torrent_dir.display().to_string(),
+        &c_dim(c),
+    );
+    kv_row(
+        out,
+        c,
+        inner,
+        line,
+        "pid file",
+        if cfg.use_pid_file { "on" } else { "off" },
+        &c_dim(c),
+    );
 }
 
 // ---- [8] log : the in-process event ring (tracing is off in TUI mode) ------
@@ -940,7 +1156,11 @@ fn build_log(out: &mut String, f: &Frame, c: &Caps, inner: usize, line: &Line) {
     if f.feed.is_empty() {
         line(
             out,
-            &format!("{d} (no events yet — they appear here as the engine runs){r}", d = c_dim(c), r = c.reset()),
+            &format!(
+                "{d} (no events yet — they appear here as the engine runs){r}",
+                d = c_dim(c),
+                r = c.reset()
+            ),
             dwidth(" (no events yet — they appear here as the engine runs)"),
         );
     }
@@ -968,12 +1188,42 @@ fn build_cfg(c: &Caps, b: &Box, inner: usize, out: &mut String, line: &Line, rul
     };
     kvc(out, "client", &format!("\"{}\"", cfg.client), &c_ok(c));
     kvc(out, "port", &cfg.port.to_string(), &c_warn(c));
-    kvc(out, "min_upload_rate", &cfg.min_upload_rate.to_string(), &c_warn(c));
-    kvc(out, "max_upload_rate", &cfg.max_upload_rate.to_string(), &c_warn(c));
-    kvc(out, "min_download_rate", &cfg.min_download_rate.to_string(), &c_warn(c));
-    kvc(out, "max_download_rate", &cfg.max_download_rate.to_string(), &c_warn(c));
-    kvc(out, "numwant", &cfg.numwant.unwrap_or(80).to_string(), &c_warn(c));
-    let help = format!("{cy} s {r}{d}save config.toml{r}", cy = c_header(c), d = c_dim(c), r = c.reset());
+    kvc(
+        out,
+        "min_upload_rate",
+        &cfg.min_upload_rate.to_string(),
+        &c_warn(c),
+    );
+    kvc(
+        out,
+        "max_upload_rate",
+        &cfg.max_upload_rate.to_string(),
+        &c_warn(c),
+    );
+    kvc(
+        out,
+        "min_download_rate",
+        &cfg.min_download_rate.to_string(),
+        &c_warn(c),
+    );
+    kvc(
+        out,
+        "max_download_rate",
+        &cfg.max_download_rate.to_string(),
+        &c_warn(c),
+    );
+    kvc(
+        out,
+        "numwant",
+        &cfg.numwant.unwrap_or(80).to_string(),
+        &c_warn(c),
+    );
+    let help = format!(
+        "{cy} s {r}{d}save config.toml{r}",
+        cy = c_header(c),
+        d = c_dim(c),
+        r = c.reset()
+    );
     line(out, &help, dwidth(" s save config.toml"));
 }
 
@@ -1000,7 +1250,11 @@ fn table_body_w(inner: usize) -> usize {
 /// Cells reserved at the left of every list row for the selection caret.
 const SEL_GUTTER: usize = 2;
 
-fn render_torrent_row(tv: &crate::ui::snapshot::TorrentView, c: &Caps, inner: usize) -> (String, usize) {
+fn render_torrent_row(
+    tv: &crate::ui::snapshot::TorrentView,
+    c: &Caps,
+    inner: usize,
+) -> (String, usize) {
     let body_w = table_body_w(inner);
     let bar_w = bar_width(body_w);
     let name_w = name_col(body_w, bar_w);
@@ -1135,11 +1389,10 @@ fn name_col(inner: usize, bar_w: usize) -> usize {
 
 /// A bracketed block progress bar: ▕████░░░▏
 fn progress_bar(done: u64, total: u64, w: usize, c: &Caps) -> String {
-    let filled = if total == 0 {
-        0
-    } else {
-        ((w as u64 * done) / total).min(w as u64) as usize
-    };
+    let filled = (w as u64 * done)
+        .checked_div(total)
+        .unwrap_or(0)
+        .min(w as u64) as usize;
     let (lb, rb, full, empty) = if c.utf8 {
         ("▕", "▏", "█", "░")
     } else {
@@ -1220,9 +1473,21 @@ mod tests {
 
     #[test]
     fn clamp_visible_closes_color_on_truncation() {
-        let colored = format!("{}{}HELLO{}", c_ok(&Caps { color: true, truecolor: false, utf8: true }), "", RESET);
+        let colored = format!(
+            "{}{}HELLO{}",
+            c_ok(&Caps {
+                color: true,
+                truecolor: false,
+                utf8: true
+            }),
+            "",
+            RESET
+        );
         let (out, vis) = clamp_visible(&colored, 3, true);
         assert!(vis <= 3);
-        assert!(out.ends_with(RESET), "truncated colored span must end with RESET: {out:?}");
+        assert!(
+            out.ends_with(RESET),
+            "truncated colored span must end with RESET: {out:?}"
+        );
     }
 }

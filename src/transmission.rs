@@ -100,8 +100,8 @@ pub fn resolve_version() -> Version {
 
 /// Build the `-TR<m><n><p>0-` peer-id prefix. Returns None if any component is
 /// >= 10: the azureus encoding is fixed single-digit-per-component, Transmission
-/// has never shipped a two-digit component, and emitting a longer prefix would
-/// be a detectable fingerprint. Caller falls back to a crate profile prefix.
+/// > has never shipped a two-digit component, and emitting a longer prefix would
+/// > be a detectable fingerprint. Caller falls back to a crate profile prefix.
 pub fn peer_id_prefix(v: &Version) -> Option<String> {
     if v.major >= 10 || v.minor >= 10 || v.patch >= 10 {
         return None;
@@ -279,6 +279,9 @@ mod tests {
         // key renders as 8 uppercase hex
         let hex = format!("{:08X}", c.key);
         assert_eq!(hex.len(), 8);
-        assert!(hex.chars().all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_lowercase()));
+        assert!(
+            hex.chars()
+                .all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_lowercase())
+        );
     }
 }
