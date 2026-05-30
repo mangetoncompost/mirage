@@ -37,7 +37,7 @@ pub struct Config {
     pub torrent_dir: PathBuf,
     // pub key_refresh_every: u16,
     /// Output file path for the JSON file.
-    /// You may want somethink like `/var/www/ratio_up.json` to expose it on your web server.
+    /// You may want somethink like `/var/www/mirage.json` to expose it on your web server.
     pub output_stats: Option<PathBuf>,
 }
 impl Default for Config {

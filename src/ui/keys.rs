@@ -17,7 +17,7 @@ use std::time::Duration;
 /// the block so `running` is re-checked ~10×/s.
 pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSender<()>) {
     let _ = std::thread::Builder::new()
-        .name("ratioup-keys".into())
+        .name("mirage-keys".into())
         .spawn(move || {
             while running.load(Ordering::Relaxed) {
                 match event::poll(Duration::from_millis(100)) {

@@ -104,7 +104,7 @@ pub struct Torrent {
     pub length: u64,
     pub private: bool,
     // pub info_hash: String,
-    /// Total of fake uploaded data since the start of RatioUp
+    /// Total of fake uploaded data since the start of Mirage
     pub uploaded: u64,
     /// Last announce to the tracker
     pub last_announce: std::time::Instant,

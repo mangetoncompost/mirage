@@ -3,30 +3,6 @@
 version = 4
 
 [[package]]
-name = "RatioUp"
-version = "1.0.0"
-dependencies = [
- "arc-swap",
- "chrono",
- "crossterm",
- "fake-torrent-client",
- "fastrand",
- "futures-util",
- "notify",
- "once_cell",
- "plist",
- "reqwest",
- "sanitize-filename",
- "sha1_smol",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "url",
- "xdg",
-]
-
-[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -971,6 +947,30 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mirage"
+version = "1.0.0"
+dependencies = [
+ "arc-swap",
+ "chrono",
+ "crossterm",
+ "fake-torrent-client",
+ "fastrand",
+ "futures-util",
+ "notify",
+ "once_cell",
+ "plist",
+ "reqwest",
+ "sanitize-filename",
+ "sha1_smol",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "xdg",
 ]
 
 [[package]]

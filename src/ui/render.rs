@@ -327,9 +327,9 @@ pub fn build_frame(f: &Frame, width: u16, view: View, sel: usize) -> String {
     let spin = SPINNER_A[f.spinner % SPINNER_A.len()];
     let uptime = fmt_hms((f.now - f.started).num_seconds().max(0) as u64);
     // top border with title on the left and spinner+uptime on the right:
-    //   ┌─ RatioUp ───────────────────── ⠹ 02:14:07 ─┐
+    //   ┌─ Mirage ───────────────────── ⠹ 02:14:07 ─┐
     {
-        let title = " RatioUp ";
+        let title = " Mirage ";
         // Global upload multiplier (always x1.00 in non-TTY mode). Two decimals
         // so the 0.25/0.50 sub-unity steps read exactly. The fill computation
         // below subtracts dwidth(&right), so the wider segment is auto-accounted.
@@ -747,12 +747,12 @@ fn build_tor(
 
     rule_line(out, c, b, rule, None);
     let help = format!(
-        "{cy}↵{r} detail   {cy}p{r} pause-row   {cy}f{r} force   {rd}x{r} remove",
+        "{cy}f{r} force   {rd}x{r} remove   {cy}p{r} pause all   {cy}?{r} help",
         cy = c_header(c),
         rd = c_err(c),
         r = c.reset(),
     );
-    line(out, &help, dwidth("↵ detail   p pause-row   f force   x remove"));
+    line(out, &help, dwidth("f force   x remove   p pause all   ? help"));
 }
 
 // ---- [3] trk : per-torrent trackers --------------------------------------

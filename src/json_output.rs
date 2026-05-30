@@ -10,13 +10,27 @@ pub fn writable(path: &str) -> bool {
         return false;
     }
     let p = Path::new(path);
-    let parent = p.parent().unwrap();
+    // A bare filename has parent "" → treat as the current dir. A path with no
+    // parent at all (rare) is simply not writable here rather than a panic.
+    let parent = match p.parent() {
+        Some(par) if par.as_os_str().is_empty() => Path::new("."),
+        Some(par) => par,
+        None => {
+            error!("OUTPUT path has no parent directory: {path}");
+            return false;
+        }
+    };
     if !parent.is_dir() {
         error!("Directory {:?} does not exist", parent.to_str());
         return false;
     }
-    let md = fs::metadata(parent).unwrap();
-    !md.permissions().readonly()
+    match fs::metadata(parent) {
+        Ok(md) => !md.permissions().readonly(),
+        Err(e) => {
+            error!("Cannot stat {:?}: {e}", parent.to_str());
+            false
+        }
+    }
 }
 
 /// Write a session file with torrent and its stats
@@ -84,9 +98,9 @@ mod tests {
         let mut permissions = md.permissions();
         permissions.set_readonly(true);
         std::fs::set_permissions(unwritable, permissions).unwrap();
-        assert!(!writable("/tmp/unwritable/ratioup.json"));
+        assert!(!writable("/tmp/unwritable/mirage.json"));
 
         // case when folder does not exists
-        assert!(!writable("/aze/rty/uio/pqs/ratioup.json"));
+        assert!(!writable("/aze/rty/uio/pqs/mirage.json"));
     }
 }

@@ -34,16 +34,28 @@ impl From<std::str::Utf8Error> for BencodeDecoderError {
     }
 }
 
+/// Maximum container nesting depth. Real torrents / announce responses are
+/// shallow (a few levels); a deeply-nested `llll…` body from a malicious tracker
+/// or crafted .torrent would otherwise recurse until the thread stack overflows
+/// and ABORTS the process (uncatchable — bypasses the panic hook, stranding the
+/// alternate screen). 32 is far beyond any legitimate structure.
+const MAX_DEPTH: usize = 32;
+
 /// A Bencode decoder.
 pub struct BencodeDecoder<'a> {
     data: &'a [u8],
     position: usize,
+    depth: usize,
 }
 
 impl<'a> BencodeDecoder<'a> {
     /// Creates a new decoder with the provided Bencode data.
     pub fn new(data: &'a [u8]) -> Self {
-        BencodeDecoder { data, position: 0 }
+        BencodeDecoder {
+            data,
+            position: 0,
+            depth: 0,
+        }
     }
 
     /// Decodes the next Bencode value from the input.
@@ -118,6 +130,10 @@ impl<'a> BencodeDecoder<'a> {
 
     /// Decodes a list (l<element1><element2>...e).
     fn decode_list(&mut self) -> Result<BencodeValue, BencodeDecoderError> {
+        if self.depth >= MAX_DEPTH {
+            return Err(BencodeDecoderError::InvalidFormat);
+        }
+        self.depth += 1;
         self.consume_byte(); // Consume 'l'
         let mut list = Vec::new();
         while self
@@ -128,11 +144,16 @@ impl<'a> BencodeDecoder<'a> {
             list.push(self.decode()?); // Recursive call
         }
         self.consume_byte(); // Consume 'e'
+        self.depth -= 1;
         Ok(BencodeValue::List(list))
     }
 
     /// Decodes a dictionary (d<key1><value1><key2><value2>...e).
     fn decode_dictionary(&mut self) -> Result<BencodeValue, BencodeDecoderError> {
+        if self.depth >= MAX_DEPTH {
+            return Err(BencodeDecoderError::InvalidFormat);
+        }
+        self.depth += 1;
         self.consume_byte(); // Consume 'd'
         let mut dict = BTreeMap::new();
         while self
@@ -149,7 +170,33 @@ impl<'a> BencodeDecoder<'a> {
             dict.insert(key, value);
         }
         self.consume_byte(); // Consume 'e'
+        self.depth -= 1;
         Ok(BencodeValue::Dictionary(dict))
+    }
+}
+
+#[cfg(test)]
+mod depth_tests {
+    use super::*;
+
+    #[test]
+    fn deeply_nested_lists_are_rejected_not_overflowed() {
+        // 100_000 nested 'l' would overflow the stack without the depth cap.
+        let mut data = vec![b'l'; 100_000];
+        data.extend(std::iter::repeat(b'e').take(100_000));
+        let mut dec = BencodeDecoder::new(&data);
+        assert!(
+            matches!(dec.decode(), Err(BencodeDecoderError::InvalidFormat)),
+            "deeply-nested input must be rejected, not recursed into a stack overflow"
+        );
+    }
+
+    #[test]
+    fn shallow_structures_still_decode() {
+        // d3:fooli1ei2eee  → {"foo": [1, 2]} — well within the cap.
+        let data = b"d3:fooli1ei2eee";
+        let mut dec = BencodeDecoder::new(data);
+        assert!(dec.decode().is_ok());
     }
 }
 

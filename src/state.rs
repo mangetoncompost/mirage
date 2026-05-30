@@ -32,11 +32,11 @@ fn hex40(h: &[u8; 20]) -> String {
 
 /// Resolve the state file path (XDG state dir, fallback to a torrent_dir sidecar).
 fn state_path() -> PathBuf {
-    if let Ok(p) = xdg::BaseDirectories::with_prefix("RatioUp").place_state_file("state.json") {
+    if let Ok(p) = xdg::BaseDirectories::with_prefix("Mirage").place_state_file("state.json") {
         return p;
     }
     let dir = crate::CONFIG.load().torrent_dir.clone();
-    dir.join(".ratioup_state.json")
+    dir.join(".mirage_state.json")
 }
 
 /// Atomically persist all torrents' download state (temp + fsync + rename).
@@ -86,7 +86,7 @@ pub fn load_dict() -> HashMap<String, Entry> {
     match parse_state(&raw) {
         Some(d) => d,
         None => {
-            warn!("RatioUp state file is corrupt, ignoring it");
+            warn!("Mirage state file is corrupt, ignoring it");
             HashMap::new()
         }
     }

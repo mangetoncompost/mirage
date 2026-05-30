@@ -270,7 +270,7 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
         Err(e) => {
             error!("Cannot resolve UDP tracker {}: {}", url, e);
             emit(EventKind::ConnectFail, &torrent.name, format!("resolve {url}: {e}"));
-            torrent.error_count += 1;
+            torrent.error_count = torrent.error_count.saturating_add(1);
             return;
         }
     };
@@ -281,7 +281,7 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
         Err(e) => {
             error!("Cannot connect to UDP tracker {}: {}", url, e);
             emit(EventKind::ConnectFail, &torrent.name, format!("connect {url}: {e}"));
-            torrent.error_count += 1;
+            torrent.error_count = torrent.error_count.saturating_add(1);
             return;
         }
     };
@@ -335,7 +335,8 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
         Ok(response) => {
             // Update torrent state on successful announce
             torrent.uploaded += uploaded;
-            torrent.interval = response.interval as u64;
+            // Clamp like the HTTP path: a 0 interval would busy-spin the scheduler.
+            torrent.interval = crate::announcer::tracker::clamp_interval(response.interval as i64);
             // Clamp instead of `as u16` to avoid wrapping a >65535 count to a
             // small/zero value (which would block upload on a big swarm).
             torrent.seeders = response.seeders.min(u16::MAX as u32) as u16;
@@ -376,7 +377,7 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
         Err(e) => {
             warn!("UDP announce failed for {}: {}", url, e);
             emit(EventKind::Error, &torrent.name, format!("UDP fail {url}: {e}"));
-            torrent.error_count += 1;
+            torrent.error_count = torrent.error_count.saturating_add(1);
         }
     }
 }

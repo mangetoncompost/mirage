@@ -51,7 +51,8 @@ pub(crate) async fn process_commands(mut rx: tokio::sync::mpsc::UnboundedReceive
             Cmd::ReinitClient => {
                 let cfg = (**CONFIG.load()).clone();
                 if let Some(n) = config::init_client(&cfg).await {
-                    tokio::spawn(crate::run_key_renewer(n));
+                    // Aborts the previous renewer before spawning — no task leak.
+                    crate::spawn_key_renewer(n);
                 }
                 info!("client re-initialised");
             }
