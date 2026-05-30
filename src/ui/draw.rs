@@ -13,7 +13,10 @@ use crossterm::{
     event::{DisableBracketedPaste, EnableBracketedPaste},
     execute,
     style::ResetColor,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{
+        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+        enable_raw_mode,
+    },
 };
 use std::io::{Write, stdout};
 
@@ -21,10 +24,22 @@ use std::io::{Write, stdout};
 /// paste. Without the last one, pasting text into the window under raw mode
 /// streams raw bytes the key thread reads as commands (a pasted 'q' would quit,
 /// 'x' would remove a torrent) — disabling it makes a paste a no-op.
+///
+/// We Clear(All)+home AFTER entering the alt screen: `EnterAlternateScreen`
+/// preserves the cursor's row, so without this the first frame paints wherever
+/// the cursor sat (mid-screen, pushing the box down) and leaves scrollable
+/// residue. Clearing pins the dashboard to a blank, unscrollable buffer.
 fn enter_screen() {
     let mut o = stdout();
     let _ = enable_raw_mode();
-    let _ = execute!(o, EnterAlternateScreen, Hide, DisableBracketedPaste);
+    let _ = execute!(
+        o,
+        EnterAlternateScreen,
+        Clear(ClearType::All),
+        MoveTo(0, 0),
+        Hide,
+        DisableBracketedPaste,
+    );
 }
 
 /// RAII guard: `enter()` on construction, `restore()` on Drop (normal-return path).
