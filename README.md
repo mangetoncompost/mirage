@@ -1,8 +1,9 @@
 # Mirage
 
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Build](https://img.shields.io/github/actions/workflow/status/mangetoncompost/mirage/ci.yml?branch=master)](https://github.com/mangetoncompost/mirage/actions)
+[![Release](https://img.shields.io/github/v/release/mangetoncompost/mirage)](https://github.com/mangetoncompost/mirage/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos-lightgrey)](https://github.com/mangetoncompost/mirage)
 
 ![Mirage dashboard demo](assets/demo.gif)
@@ -109,12 +110,31 @@ and the process exits.
 
 ## Installation
 
-### Requirements
+### Download a pre-built binary
 
-- Rust toolchain (edition 2024, stable)
-- macOS (for the `.app` launcher; the binary itself also runs on Linux)
+Pre-compiled binaries for Linux and macOS are available on the
+[releases page](https://github.com/mangetoncompost/mirage/releases/latest).
 
-### Build
+| File | Platform |
+|------|----------|
+| `mirage-linux-x86_64` | Linux x86_64 (static, no dependencies) |
+| `mirage-macos-aarch64` | macOS Apple Silicon |
+| `mirage-macos-x86_64` | macOS Intel |
+| `Mirage.app.zip` | macOS app bundle (double-click to launch) |
+
+On Linux and macOS, make the binary executable after downloading:
+
+```
+chmod +x mirage-linux-x86_64
+./mirage-linux-x86_64
+```
+
+On macOS, unzip `Mirage.app.zip` and move `Mirage.app` to `/Applications`. It
+opens the live dashboard in a Terminal.app window sized to 110x34 columns.
+
+### Build from source
+
+Requires Rust stable (edition 2024):
 
 ```
 cargo build --release
@@ -122,25 +142,13 @@ cargo build --release
 
 The release binary is `target/release/mirage`.
 
-### macOS app bundle
-
-The script `scripts/make_app.sh` wraps the release binary in a double-clickable
-`Mirage.app` that opens the live dashboard in a Terminal.app window sized to
-110x34 columns:
+To build the macOS app bundle:
 
 ```
 cargo build --release && scripts/make_app.sh
-```
-
-Pass `--install` to also copy the bundle to `/Applications`:
-
-```
+# or, to install directly to /Applications:
 scripts/make_app.sh --install
 ```
-
-The `.app` contains a copy of the release binary. It sets the working directory
-to the configured `torrent_dir` (or `$HOME` if unresolvable) before launching,
-so a relative `torrent_dir = "."` in the config resolves correctly.
 
 
 ## Configuration
