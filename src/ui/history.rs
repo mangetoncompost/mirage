@@ -58,8 +58,12 @@ pub fn push_sample(secs: i64, total_up: u64, row_peak: u64) {
     // sample carries its own `secs`, the graph's X axis stays correct regardless
     // of how many downsampling passes have happened.
     if q.len() > CAP {
-        let kept: VecDeque<(i64, u64)> =
-            q.iter().enumerate().filter(|(i, _)| i % 2 == 0).map(|(_, s)| *s).collect();
+        let kept: VecDeque<(i64, u64)> = q
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| i % 2 == 0)
+            .map(|(_, s)| *s)
+            .collect();
         *q = kept;
     }
 }

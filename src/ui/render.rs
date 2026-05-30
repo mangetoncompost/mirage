@@ -374,7 +374,13 @@ pub fn build_frame(
     {
         let active_idx = view as usize;
         // Label for tab i: digit is (i+1) for tabs 0-8, "0" for tab 9 (Ratio).
-        let tab_key = |i: usize| -> String { if i == 9 { "0".into() } else { (i + 1).to_string() } };
+        let tab_key = |i: usize| -> String {
+            if i == 9 {
+                "0".into()
+            } else {
+                (i + 1).to_string()
+            }
+        };
         let full_w: usize = TAB_LABELS
             .iter()
             .enumerate()
@@ -483,7 +489,11 @@ pub fn build_frame(
             tot = format_bytes_u64(total_up),
             spd = format_bytes(total_speed),
             err = total_err,
-            mark = if n_marked > 0 { format!("   ✓ {n_marked}") } else { String::new() },
+            mark = if n_marked > 0 {
+                format!("   ✓ {n_marked}")
+            } else {
+                String::new()
+            },
         );
         let mut txt = format!(
             "{bold}{n}{r} torrent{plural}   {ok}↑ total {tot}{r}   {warn}up {spd}/s{r}   {err}{mark}",
@@ -645,7 +655,16 @@ fn build_dash(
     let visible = n.min(MAX_VISIBLE_ROWS);
     for (i, tv) in f.rows.iter().take(visible).enumerate() {
         let (content, vis) = render_torrent_row(tv, c, inner, f.frame_peak_speed);
-        emit_row(out, c, inner, line, &content, vis, i == sel, f.marked.contains(&tv.info_hash));
+        emit_row(
+            out,
+            c,
+            inner,
+            line,
+            &content,
+            vis,
+            i == sel,
+            f.marked.contains(&tv.info_hash),
+        );
     }
     if n > MAX_VISIBLE_ROWS {
         let more = format!("{}(+{} more)…{}", c_dim(c), n - MAX_VISIBLE_ROWS, c.reset());
@@ -699,26 +718,54 @@ fn build_help(out: &mut String, c: &Caps, inner: usize, term_h: usize, line: &Li
     head(&mut scratch, "navigation");
     row(&mut scratch, "1-9 / 0", "jump to tab (0 = ratio graph)");
     row(&mut scratch, "← →", "previous / next tab");
-    row(&mut scratch, "↑ ↓", "select row (or upload multiplier off the lists)");
-    row(&mut scratch, "Enter", "open detail card for selected torrent");
+    row(
+        &mut scratch,
+        "↑ ↓",
+        "select row (or upload multiplier off the lists)",
+    );
+    row(
+        &mut scratch,
+        "Enter",
+        "open detail card for selected torrent",
+    );
     row(&mut scratch, "Esc", "back to dashboard (or close overlay)");
     line_s(&mut scratch, "", 0);
     head(&mut scratch, "actions");
     row(&mut scratch, "p", "pause / resume all uploads (global)");
     row(&mut scratch, "r", "resume all uploads");
     row(&mut scratch, "f", "force-announce selected (or all marked)");
-    row(&mut scratch, "x", "remove selected (or all marked, announces stopped)");
-    row(&mut scratch, "Space", "toggle mark on selected row (multi-select)");
+    row(
+        &mut scratch,
+        "x",
+        "remove selected (or all marked, announces stopped)",
+    );
+    row(
+        &mut scratch,
+        "Space",
+        "toggle mark on selected row (multi-select)",
+    );
     row(&mut scratch, "a / A", "mark all visible / clear all marks");
     row(&mut scratch, "e", "export snapshot to JSON (+ clipboard)");
-    row(&mut scratch, "+ -", "edit selected setting on the Speeds tab");
+    row(
+        &mut scratch,
+        "+ -",
+        "edit selected setting on the Speeds tab",
+    );
     line_s(&mut scratch, "", 0);
     head(&mut scratch, "overlays");
-    row(&mut scratch, ":", "open command palette (fuzzy search all actions)");
+    row(
+        &mut scratch,
+        ":",
+        "open command palette (fuzzy search all actions)",
+    );
     row(&mut scratch, "i / w", "[detail] info / wire sub-tab");
     line_s(&mut scratch, "", 0);
     head(&mut scratch, "tabs");
-    row(&mut scratch, "k", "[cli] re-init the emulated client (new key)");
+    row(
+        &mut scratch,
+        "k",
+        "[cli] re-init the emulated client (new key)",
+    );
     row(&mut scratch, "s", "[cfg] save config.toml");
     line_s(&mut scratch, "", 0);
     head(&mut scratch, "session");
@@ -1569,9 +1616,17 @@ fn BOLD_if(color: bool) -> &'static str {
 
 /// All palette commands: (label used for matching, display label, key hint).
 const PALETTE_CMDS: &[(&str, &str, &str)] = &[
-    ("force announce selected", "force-announce selected torrent", "[f]"),
+    (
+        "force announce selected",
+        "force-announce selected torrent",
+        "[f]",
+    ),
     ("remove selected torrent", "remove selected torrent", "[x]"),
-    ("pause toggle all uploads", "pause / resume all uploads", "[p]"),
+    (
+        "pause toggle all uploads",
+        "pause / resume all uploads",
+        "[p]",
+    ),
     ("resume all uploads", "resume all uploads", "[r]"),
     ("reinit client new key", "re-init client (new key)", "[k]"),
     ("export snapshot json", "export snapshot to JSON", "[e]"),
@@ -1587,7 +1642,11 @@ const PALETTE_CMDS: &[(&str, &str, &str)] = &[
     ("go to config tab 9", "→ Config tab", "[9]"),
     ("go to ratio graph tab 0", "→ Ratio graph tab", "[0]"),
     ("help overlay question mark", "toggle help overlay", "[?]"),
-    ("detail open selected torrent enter", "open detail card for selected", "[Enter]"),
+    (
+        "detail open selected torrent enter",
+        "open detail card for selected",
+        "[Enter]",
+    ),
 ];
 
 /// How many palette items match the current query (for key-thread navigation).
@@ -1598,7 +1657,10 @@ pub fn palette_match_count() -> usize {
         return PALETTE_CMDS.len();
     }
     let ql = q.to_lowercase();
-    PALETTE_CMDS.iter().filter(|(key, _, _)| key.contains(&*ql)).count()
+    PALETTE_CMDS
+        .iter()
+        .filter(|(key, _, _)| key.contains(&*ql))
+        .count()
 }
 
 /// Execute the Nth visible palette item (called by the key thread on Enter).
@@ -1616,27 +1678,73 @@ pub fn execute_palette_item(idx: usize, selected_hash: Option<[u8; 20]>) {
             .map(|(i, _)| i)
             .collect()
     };
-    let Some(&cmd_idx) = items.get(idx) else { return };
+    let Some(&cmd_idx) = items.get(idx) else {
+        return;
+    };
     match cmd_idx {
-        0 => { if let Some(h) = selected_hash { control::send(Cmd::ForceAnnounce(h)); } }
-        1 => { if let Some(h) = selected_hash { control::send(Cmd::Remove(h)); } }
-        2 => { crate::control::toggle_paused(); }
-        3 => { crate::control::set_paused(false); }
-        4 => { control::send(Cmd::ReinitClient); }
-        5 => { control::send(Cmd::ExportSnapshot); }
-        6 => { control::send(Cmd::SaveConfig); }
-        7  => { crate::ui::view::set_view(0); }
-        8  => { crate::ui::view::set_view(1); }
-        9  => { crate::ui::view::set_view(2); }
-        10 => { crate::ui::view::set_view(3); }
-        11 => { crate::ui::view::set_view(4); }
-        12 => { crate::ui::view::set_view(5); }
-        13 => { crate::ui::view::set_view(6); }
-        14 => { crate::ui::view::set_view(7); }
-        15 => { crate::ui::view::set_view(8); }
-        16 => { crate::ui::view::set_view(9); }
-        17 => { crate::ui::overlay::toggle_help(); }
-        18 => { if let Some(h) = selected_hash { crate::ui::overlay::open_detail(h); } }
+        0 => {
+            if let Some(h) = selected_hash {
+                control::send(Cmd::ForceAnnounce(h));
+            }
+        }
+        1 => {
+            if let Some(h) = selected_hash {
+                control::send(Cmd::Remove(h));
+            }
+        }
+        2 => {
+            crate::control::toggle_paused();
+        }
+        3 => {
+            crate::control::set_paused(false);
+        }
+        4 => {
+            control::send(Cmd::ReinitClient);
+        }
+        5 => {
+            control::send(Cmd::ExportSnapshot);
+        }
+        6 => {
+            control::send(Cmd::SaveConfig);
+        }
+        7 => {
+            crate::ui::view::set_view(0);
+        }
+        8 => {
+            crate::ui::view::set_view(1);
+        }
+        9 => {
+            crate::ui::view::set_view(2);
+        }
+        10 => {
+            crate::ui::view::set_view(3);
+        }
+        11 => {
+            crate::ui::view::set_view(4);
+        }
+        12 => {
+            crate::ui::view::set_view(5);
+        }
+        13 => {
+            crate::ui::view::set_view(6);
+        }
+        14 => {
+            crate::ui::view::set_view(7);
+        }
+        15 => {
+            crate::ui::view::set_view(8);
+        }
+        16 => {
+            crate::ui::view::set_view(9);
+        }
+        17 => {
+            crate::ui::overlay::toggle_help();
+        }
+        18 => {
+            if let Some(h) = selected_hash {
+                crate::ui::overlay::open_detail(h);
+            }
+        }
         _ => {}
     }
 }
@@ -1647,7 +1755,11 @@ fn build_palette(out: &mut String, c: &Caps, inner: usize, term_h: usize, line: 
 
     // Filter items by substring match (case-insensitive).
     let matches: Vec<(usize, &str, &str)> = if query.is_empty() {
-        PALETTE_CMDS.iter().enumerate().map(|(i, (_, lbl, hint))| (i, *lbl, *hint)).collect()
+        PALETTE_CMDS
+            .iter()
+            .enumerate()
+            .map(|(i, (_, lbl, hint))| (i, *lbl, *hint))
+            .collect()
     } else {
         let ql = query.to_lowercase();
         PALETTE_CMDS
@@ -1671,7 +1783,11 @@ fn build_palette(out: &mut String, c: &Caps, inner: usize, term_h: usize, line: 
     // Separator.
     let sep_char = if c.utf8 { "─" } else { "-" };
     let sep = sep_char.repeat(inner.saturating_sub(4));
-    line(out, &format!("{d} {sep}{r}", d = c_dim(c), r = c.reset()), 1 + dwidth(&sep));
+    line(
+        out,
+        &format!("{d} {sep}{r}", d = c_dim(c), r = c.reset()),
+        1 + dwidth(&sep),
+    );
 
     let budget = term_h.saturating_sub(6).min(matches.len());
     // Scroll window: keep selected row visible.
@@ -1684,7 +1800,11 @@ fn build_palette(out: &mut String, c: &Caps, inner: usize, term_h: usize, line: 
         } else {
             "  ".to_string()
         };
-        let lbl_col = if is_sel { c_ok(c) } else { c.reset().to_string() };
+        let lbl_col = if is_sel {
+            c_ok(c)
+        } else {
+            c.reset().to_string()
+        };
         let row = format!(
             "{g}{lbl_col}{lbl:<32}{r}  {d}{hint}{r}",
             g = gutter,
@@ -1740,7 +1860,13 @@ fn build_detail(
                 w = if sub == 1 { c_header(c) } else { c_dim(c) },
                 wire = "[w]ire",
             );
-            rule_line(out, c, b, rule, Some(&format!("{}{}{}", tv.name, sub_strip, "")));
+            rule_line(
+                out,
+                c,
+                b,
+                rule,
+                Some(&format!("{}{}{}", tv.name, sub_strip, "")),
+            );
 
             match sub {
                 0 => {
@@ -1751,8 +1877,16 @@ fn build_detail(
                     let l_str = tv.leechers.to_string();
                     let nxt_str = fmt_mmss(tv.secs_to_announce);
                     let err_str = tv.error_count.to_string();
-                    let err_col = if tv.error_count > 0 { c_err(c) } else { c_dim(c) };
-                    let state_str = if tv.downloading { "downloading" } else { "seeding" };
+                    let err_col = if tv.error_count > 0 {
+                        c_err(c)
+                    } else {
+                        c_dim(c)
+                    };
+                    let state_str = if tv.downloading {
+                        "downloading"
+                    } else {
+                        "seeding"
+                    };
                     let state_col = if tv.downloading { c_warn(c) } else { c_ok(c) };
                     kv_row(out, c, inner, line, "name", &tv.name, c.reset());
                     kv_row(out, c, inner, line, "uploaded", &up_str, &c_ok(c));
@@ -1767,7 +1901,11 @@ fn build_detail(
                     }
                     for url in tv.urls.iter() {
                         let u = truncate(url, inner.saturating_sub(20), c.utf8);
-                        line(out, &format!("{d}  {u}{r}", d = c_dim(c), r = c.reset()), 2 + dwidth(&u));
+                        line(
+                            out,
+                            &format!("{d}  {u}{r}", d = c_dim(c), r = c.reset()),
+                            2 + dwidth(&u),
+                        );
                     }
                 }
                 _ => {
@@ -1853,7 +1991,13 @@ fn build_ratio(out: &mut String, f: &Frame, c: &Caps, inner: usize, line: &Line)
             String::new()
         };
         let mut graph_row = String::new();
-        graph_row.push_str(&format!("{d}{:>label_w$} {r}", y_label, d = c_dim(c), r = c.reset(), label_w = label_w));
+        graph_row.push_str(&format!(
+            "{d}{:>label_w$} {r}",
+            y_label,
+            d = c_dim(c),
+            r = c.reset(),
+            label_w = label_w
+        ));
         for &v in &cols {
             let (glyph, col) = if v >= threshold {
                 (if c.utf8 { "▆" } else { "#" }, c_ok(c))
@@ -1889,10 +2033,12 @@ fn build_ratio(out: &mut String, f: &Frame, c: &Caps, inner: usize, line: &Line)
         tot = crate::utils::format_bytes_u64(total_up),
         pk = crate::utils::format_bytes(peak_speed.min(u32::MAX as u64) as u32),
     );
-    let vis = dwidth(&format!(" session {}  total ↑ {}  peak {}/s",
+    let vis = dwidth(&format!(
+        " session {}  total ↑ {}  peak {}/s",
         fmt_hms(uptime),
         crate::utils::format_bytes_u64(total_up),
-        crate::utils::format_bytes(peak_speed.min(u32::MAX as u64) as u32)));
+        crate::utils::format_bytes(peak_speed.min(u32::MAX as u64) as u32)
+    ));
     line(out, &summary, vis.min(inner.saturating_sub(2)));
 }
 

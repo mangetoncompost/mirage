@@ -67,8 +67,16 @@ pub fn base64_encode(input: &[u8]) -> String {
         let combined = (b0 << 16) | (b1 << 8) | b2;
         out.push(ALPHA[((combined >> 18) & 0x3f) as usize] as char);
         out.push(ALPHA[((combined >> 12) & 0x3f) as usize] as char);
-        out.push(if chunk.len() > 1 { ALPHA[((combined >> 6) & 0x3f) as usize] as char } else { '=' });
-        out.push(if chunk.len() > 2 { ALPHA[(combined & 0x3f) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            ALPHA[((combined >> 6) & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            ALPHA[(combined & 0x3f) as usize] as char
+        } else {
+            '='
+        });
     }
     out
 }

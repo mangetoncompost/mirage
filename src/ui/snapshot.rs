@@ -33,20 +33,20 @@ pub struct TorrentView {
     pub leechers: u16,
     pub up_speed: u32, // bytes/s (next_upload_speed)
     pub uploaded: u64, // total bytes
-    pub length: u64, // total torrent size (bytes) — ratio denominator + detail card
+    pub length: u64,   // total torrent size (bytes) — ratio denominator + detail card
     #[allow(dead_code)]
     pub left: u64, // declared bytes left (0 when seeding) — future detail
     #[allow(dead_code)]
     pub interval: u64, // current announce interval (s) — for the Schedule ledger / detail card
     pub secs_to_announce: u64, // interval - elapsed, saturating
     pub error_count: u16,
-    pub busy: bool,        // true => mid-announce, try_lock failed (placeholder row)
-    pub downloading: bool, // true => still in the simulated download phase
+    pub busy: bool,          // true => mid-announce, try_lock failed (placeholder row)
+    pub downloading: bool,   // true => still in the simulated download phase
     pub schedule_reason: u8, // why the current cadence (see torrent::ScheduleReason) — F3.3 ledger
-    pub dl_percent: u8,    // 0..=100 download progress
+    pub dl_percent: u8,      // 0..=100 download progress
     #[allow(dead_code)]
     pub downloaded: u64, // declared downloaded bytes (display interpolation)
-    pub urls: Vec<String>, // announce URL(s) for the trackers view
+    pub urls: Vec<String>,   // announce URL(s) for the trackers view
 }
 
 #[derive(Clone)]

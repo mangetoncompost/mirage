@@ -177,7 +177,12 @@ fn parse_state(raw: &str) -> Option<HashMap<String, Entry>> {
         };
         map.insert(
             hash.to_string(),
-            Entry { length, downloaded, seeding, upload_target },
+            Entry {
+                length,
+                downloaded,
+                seeding,
+                upload_target,
+            },
         );
         // Advance past the matched KEY so the next iteration finds the next object.
         rest = &rest[start + KEY.len()..];
@@ -215,7 +220,12 @@ mod tests {
     use super::*;
 
     fn entry(length: u64, downloaded: u64, seeding: bool) -> Entry {
-        Entry { length, downloaded, seeding, upload_target: None }
+        Entry {
+            length,
+            downloaded,
+            seeding,
+            upload_target: None,
+        }
     }
 
     #[test]
@@ -297,7 +307,15 @@ mod tests {
 
         // upload_target restored
         let mut dict = HashMap::new();
-        dict.insert(key.clone(), Entry { length: 1000, downloaded: 1000, seeding: true, upload_target: Some(123456) });
+        dict.insert(
+            key.clone(),
+            Entry {
+                length: 1000,
+                downloaded: 1000,
+                seeding: true,
+                upload_target: Some(123456),
+            },
+        );
         apply(&mut t, &dict);
         assert_eq!(t.upload_target, Some(123456));
 
