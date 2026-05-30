@@ -1,7 +1,8 @@
+use arc_swap::ArcSwap;
+use once_cell::sync::Lazy;
 use std::str::FromStr;
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
 use toml::Value;
 use tracing::{error, info, warn};
 
@@ -9,11 +10,10 @@ use crate::transmission;
 
 // use crate::json_output;
 
-/// Constant uppercase-hex session key for the HTTP announce path, set once in
-/// init_client and read in build_url. The UDP path keeps using client.key (u32);
-/// both serialize the SAME key. A real Transmission sends an 8-hex-uppercase
-/// `key=` that never changes during a session.
-pub static KEY_HEX: OnceLock<String> = OnceLock::new();
+/// Uppercase-hex session key for the HTTP announce path, set in init_client and
+/// read in build_url. ArcSwap so a runtime client re-init (from the GUI) can
+/// re-store it. The UDP path uses client.key (u32); both serialize the SAME key.
+pub static KEY_HEX: Lazy<ArcSwap<String>> = Lazy::new(|| ArcSwap::from_pointee(String::new()));
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -241,12 +241,12 @@ pub async fn init_client(config: &Config) -> Option<u16> {
     // Preformat the uppercase-hex key ONCE from the final u32 so the HTTP path
     // (hex) and the UDP path (key.to_be_bytes()) serialize the SAME key, constant
     // for the whole session. Real Transmission sends 8 hex uppercase, not decimal.
-    let _ = KEY_HEX.set(format!("{:08X}", client.key));
+    KEY_HEX.store(std::sync::Arc::new(format!("{:08X}", client.key)));
 
     info!(
         "Client {} (key: {}, peer ID: {})",
         client.name,
-        KEY_HEX.get().map(String::as_str).unwrap_or(""),
+        KEY_HEX.load().as_str(),
         client.peer_id
     );
     let key_interval = client.key_refresh_every;

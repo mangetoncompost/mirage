@@ -35,10 +35,7 @@ fn state_path() -> PathBuf {
     if let Ok(p) = xdg::BaseDirectories::with_prefix("RatioUp").place_state_file("state.json") {
         return p;
     }
-    let dir = crate::CONFIG
-        .get()
-        .map(|c| c.torrent_dir.clone())
-        .unwrap_or_else(|| PathBuf::from("."));
+    let dir = crate::CONFIG.load().torrent_dir.clone();
     dir.join(".ratioup_state.json")
 }
 

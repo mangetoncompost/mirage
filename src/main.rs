@@ -1,7 +1,10 @@
 #![allow(non_snake_case)]
 
+use arc_swap::ArcSwap;
 use fake_torrent_client::Client;
+use once_cell::sync::Lazy;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::{Mutex, OnceCell, RwLock};
 use tokio::time::Duration;
 use tracing::{self, error, info, warn};
@@ -14,6 +17,7 @@ use crate::torrent::Torrent;
 mod announcer;
 pub mod bencode;
 mod config;
+mod control;
 mod directory;
 pub mod json_output;
 mod state;
@@ -24,7 +28,9 @@ mod utils;
 mod watcher;
 
 static STARTED: OnceCell<chrono::DateTime<chrono::Utc>> = OnceCell::const_new();
-static CONFIG: OnceCell<Config> = OnceCell::const_new();
+/// Live, lock-free swappable config: the native GUI can edit it at runtime and
+/// the announce hot path reads it with `CONFIG.load()`. Defaults until set in main.
+static CONFIG: Lazy<ArcSwap<Config>> = Lazy::new(|| ArcSwap::from_pointee(Config::default()));
 static CLIENT: RwLock<Option<Client>> = RwLock::const_new(None);
 static TORRENTS: RwLock<Vec<Mutex<Torrent>>> = RwLock::const_new(Vec::new()); // TODO: replace with mutex
 
@@ -126,10 +132,7 @@ async fn main() {
         format_bytes(config.max_upload_rate)
     );
 
-    if let Err(e) = CONFIG.set(config.clone()) {
-        error!("Cannot set config: {e}");
-        return;
-    }
+    CONFIG.store(Arc::new(config.clone()));
     if let Err(e) = STARTED.set(chrono::offset::Utc::now()) {
         error!("Cannot set start time: {e}");
         return;
@@ -154,7 +157,7 @@ async fn main() {
     let wait_time = announcer::tracker::announce_started().await;
 
     // Start file watcher for dynamic torrent management
-    let watch_dir = CONFIG.get().unwrap().torrent_dir.clone();
+    let watch_dir = CONFIG.load().torrent_dir.clone();
     tokio::spawn(async move {
         watcher::watch_directory(watch_dir).await;
     });
