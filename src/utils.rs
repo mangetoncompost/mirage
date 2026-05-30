@@ -7,6 +7,8 @@ pub fn format_bytes_u64(bytes: u64) -> String {
     const MB: u64 = KB * 1024;
     const GB: u64 = MB * 1024;
     const TB: u64 = GB * 1024;
+    const PB: u64 = TB * 1024;
+    const EB: u64 = PB * 1024;
 
     if bytes < KB {
         format!("{} B", bytes)
@@ -16,8 +18,12 @@ pub fn format_bytes_u64(bytes: u64) -> String {
         format!("{:.1} MB", bytes as f64 / MB as f64)
     } else if bytes < TB {
         format!("{:.1} GB", bytes as f64 / GB as f64)
-    } else {
+    } else if bytes < PB {
         format!("{:.1} TB", bytes as f64 / TB as f64)
+    } else if bytes < EB {
+        format!("{:.1} PB", bytes as f64 / PB as f64)
+    } else {
+        format!("{:.1} EB", bytes as f64 / EB as f64)
     }
 }
 

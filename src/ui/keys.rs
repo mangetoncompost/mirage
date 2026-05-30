@@ -89,15 +89,23 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                     // busy sentinel.
                     (KeyCode::Char('f'), _) => {
                         if is_list_view(active) {
-                            if let Some(h) = view::selected_hash() {
-                                control::send(Cmd::ForceAnnounce(h));
+                            match view::selected_hash() {
+                                Some(h) => control::send(Cmd::ForceAnnounce(h)),
+                                None if view::row_count() > 0 => {
+                                    crate::ui::emit(crate::ui::EventKind::Error, "—", "torrent busy (announcing) — try again");
+                                }
+                                None => {}
                             }
                         }
                     }
                     (KeyCode::Char('x'), _) => {
                         if is_list_view(active) {
-                            if let Some(h) = view::selected_hash() {
-                                control::send(Cmd::Remove(h));
+                            match view::selected_hash() {
+                                Some(h) => control::send(Cmd::Remove(h)),
+                                None if view::row_count() > 0 => {
+                                    crate::ui::emit(crate::ui::EventKind::Error, "—", "torrent busy (announcing) — try again");
+                                }
+                                None => {}
                             }
                         }
                     }

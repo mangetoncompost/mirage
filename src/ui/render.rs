@@ -414,12 +414,12 @@ pub fn build_frame(f: &Frame, width: u16, view: View, sel: usize) -> String {
     // emits its rows through the shared `line`/`rule` helpers so every view keeps
     // identical width/box/color discipline.
     if crate::ui::view::help_open() {
-        build_help(&mut out, &c, inner, &line);
+        build_help(&mut out, &c, inner, f.term_h, &line);
     } else {
         match view {
             View::Dashboard => build_dash(&mut out, f, &c, &b, inner, sel, &line, &rule),
             View::Torrents => build_tor(&mut out, f, &c, &b, inner, sel, &line, &rule),
-            View::Trackers => build_trk(&mut out, f, &c, inner, sel, &line),
+            View::Trackers => build_trk(&mut out, f, &c, inner, sel, f.term_h, &line),
             View::Speeds => build_spd(&mut out, f, &c, &b, inner, sel, &line, &rule),
             View::Client => build_cli(&mut out, f, &c, &b, inner, &line, &rule),
             View::Schedule => build_sch(&mut out, f, &c, inner, &line),
@@ -598,7 +598,7 @@ fn build_dash(
         let bar_w = bar_width(body_w);
         let name_w = name_col(body_w, bar_w);
         let hdr = format!(
-            "{gut}{d}{name:<name_w$} {s:>4} {l:>4} {up:>10} {tot:>11} {nxt:>6} {pad}{r}",
+            "{gut}{d}{name:<name_w$} {s:>5} {l:>5} {up:>10} {tot:>11} {nxt:>6} {pad}{r}",
             gut = " ".repeat(SEL_GUTTER),
             d = c_dim(c),
             r = c.reset(),
@@ -611,7 +611,7 @@ fn build_dash(
             nxt = "NEXT",
             pad = " ".repeat(bar_w + 1),
         );
-        let vis = SEL_GUTTER + name_w + 1 + 4 + 1 + 4 + 1 + 10 + 1 + 11 + 1 + 6 + 1 + bar_w + 1;
+        let vis = SEL_GUTTER + name_w + 1 + 5 + 1 + 5 + 1 + 10 + 1 + 11 + 1 + 6 + 1 + bar_w + 1;
         line(out, &hdr, vis.min(inner.saturating_sub(2)));
     }
 
@@ -638,35 +638,50 @@ fn build_dash(
 }
 
 // ---- ? : help overlay (full keymap) ---------------------------------------
-fn build_help(out: &mut String, c: &Caps, inner: usize, line: &Line) {
-    let head = |out: &mut String, t: &str| {
-        line(out, &format!("{cy} {t}{r}", cy = c_header(c), t = t, r = c.reset()), dwidth(t) + 1);
+fn build_help(out: &mut String, c: &Caps, inner: usize, term_h: usize, line: &Line) {
+    // Build into a scratch buffer first, then copy only as many \r\n-delimited
+    // lines as fit the body budget (term_h - 3 header rows - 3 footer rows).
+    let mut scratch = String::new();
+    let line_s = |s: &mut String, content: &str, vis: usize| line(s, content, vis);
+    let head = |s: &mut String, t: &str| {
+        line_s(s, &format!("{cy} {t}{r}", cy = c_header(c), t = t, r = c.reset()), dwidth(t) + 1);
     };
-    let row = |out: &mut String, key: &str, desc: &str| {
+    let row = |s: &mut String, key: &str, desc: &str| {
         let txt = format!("   {cy}{key:<10}{r}{d}{desc}{r}", cy = c_header(c), key = key, r = c.reset(), d = c_dim(c), desc = desc);
-        line(out, &txt, (3 + 10 + dwidth(desc)).min(inner.saturating_sub(2)));
+        line_s(s, &txt, (3 + 10 + dwidth(desc)).min(inner.saturating_sub(2)));
     };
-    line(out, "", 0);
-    head(out, "navigation");
-    row(out, "1-9", "jump to tab");
-    row(out, "← →", "previous / next tab");
-    row(out, "↑ ↓", "select row (or upload multiplier off the lists)");
-    row(out, "Esc", "back to dashboard (or close this help)");
-    line(out, "", 0);
-    head(out, "actions");
-    row(out, "p", "pause / resume all uploads (global)");
-    row(out, "r", "resume all uploads");
-    row(out, "f", "force announce the selected torrent");
-    row(out, "x", "remove the selected torrent (announces stopped)");
-    row(out, "+ -", "edit the selected setting on the Speeds tab");
-    line(out, "", 0);
-    head(out, "tabs");
-    row(out, "k", "[cli] re-init the emulated client (new key)");
-    row(out, "s", "[cfg] save config.toml");
-    line(out, "", 0);
-    head(out, "session");
-    row(out, "?", "toggle this help");
-    row(out, "q / ^C", "quit (announces stopped, saves state)");
+    line_s(&mut scratch, "", 0);
+    head(&mut scratch, "navigation");
+    row(&mut scratch, "1-9", "jump to tab");
+    row(&mut scratch, "← →", "previous / next tab");
+    row(&mut scratch, "↑ ↓", "select row (or upload multiplier off the lists)");
+    row(&mut scratch, "Esc", "back to dashboard (or close this help)");
+    line_s(&mut scratch, "", 0);
+    head(&mut scratch, "actions");
+    row(&mut scratch, "p", "pause / resume all uploads (global)");
+    row(&mut scratch, "r", "resume all uploads");
+    row(&mut scratch, "f", "force announce the selected torrent");
+    row(&mut scratch, "x", "remove the selected torrent (announces stopped)");
+    row(&mut scratch, "+ -", "edit the selected setting on the Speeds tab");
+    line_s(&mut scratch, "", 0);
+    head(&mut scratch, "tabs");
+    row(&mut scratch, "k", "[cli] re-init the emulated client (new key)");
+    row(&mut scratch, "s", "[cfg] save config.toml");
+    line_s(&mut scratch, "", 0);
+    head(&mut scratch, "session");
+    row(&mut scratch, "?", "toggle this help");
+    row(&mut scratch, "q / ^C", "quit (announces stopped, saves state)");
+
+    // Clip to fit: header uses 3 rows, footer uses 3 rows — body budget is the rest.
+    let budget = term_h.saturating_sub(6);
+    let mut count = 0usize;
+    for segment in scratch.split_inclusive("\r\n") {
+        if count >= budget {
+            break;
+        }
+        out.push_str(segment);
+        count += 1;
+    }
 }
 
 /// Emit a list row with the `SEL_GUTTER`-cell selection gutter at the left:
@@ -717,7 +732,9 @@ fn build_tor(
     );
     line(out, &hdr, inner.saturating_sub(2));
 
-    for (i, tv) in f.rows.iter().enumerate() {
+    // Cap visible rows: header(1) + rule(1) + help(1) + footer(3) = 6 fixed lines
+    let visible = f.rows.len().min(MAX_VISIBLE_ROWS).min(f.term_h.saturating_sub(6));
+    for (i, tv) in f.rows.iter().take(visible).enumerate() {
         let dot = dot_span(tv, c);
         let name = truncate(&tv.name, 21, c.utf8);
         let state = if tv.downloading {
@@ -744,6 +761,10 @@ fn build_tor(
         let vis = 3 + 1 + 2 + dwidth(&name) + 9 + 5 + 5 + 1 + 8;
         emit_row(out, c, inner, line, &body, vis.min(inner.saturating_sub(2)), i == sel);
     }
+    if f.rows.len() > visible {
+        let more = format!("{}(+{} more)…{}", c_dim(c), f.rows.len() - visible, c.reset());
+        line(out, &more, dwidth(&format!("(+{} more)…", f.rows.len() - visible)));
+    }
 
     rule_line(out, c, b, rule, None);
     let help = format!(
@@ -756,10 +777,12 @@ fn build_tor(
 }
 
 // ---- [3] trk : per-torrent trackers --------------------------------------
-fn build_trk(out: &mut String, f: &Frame, c: &Caps, inner: usize, sel: usize, line: &Line) {
+fn build_trk(out: &mut String, f: &Frame, c: &Caps, inner: usize, sel: usize, term_h: usize, line: &Line) {
     let hdr = format!("{d} per-torrent trackers (snapshot){r}", d = c_dim(c), r = c.reset());
     line(out, &hdr, dwidth(" per-torrent trackers (snapshot)"));
-    for (i, tv) in f.rows.iter().enumerate() {
+    // header(1) + footer(3) = 4 fixed; cap same as dash
+    let visible = f.rows.len().min(MAX_VISIBLE_ROWS).min(term_h.saturating_sub(4));
+    for (i, tv) in f.rows.iter().take(visible).enumerate() {
         let dot = dot_span(tv, c);
         let url = tv.urls.first().map(|u| u.as_str()).unwrap_or("(no tracker)");
         let host = url
@@ -783,6 +806,10 @@ fn build_trk(out: &mut String, f: &Frame, c: &Caps, inner: usize, sel: usize, li
         );
         let vis = 2 + 26 + 1 + dwidth(host) + 2 + dwidth(&format!("S{} L{}", tv.seeders, tv.leechers));
         emit_row(out, c, inner, line, &body, vis.min(inner.saturating_sub(2)), i == sel);
+    }
+    if f.rows.len() > visible {
+        let more = format!("{}(+{} more)…{}", c_dim(c), f.rows.len() - visible, c.reset());
+        line(out, &more, dwidth(&format!("(+{} more)…", f.rows.len() - visible)));
     }
 }
 
@@ -981,7 +1008,7 @@ fn render_torrent_row(tv: &crate::ui::snapshot::TorrentView, c: &Caps, inner: us
     if tv.busy {
         let name = "(announcing…)";
         let txt = format!(
-            "{d}{name:<name_w$} {s:>4} {l:>4} {up:>10} {tot:>11} {nxt:>6} {bar}{r}",
+            "{d}{name:<name_w$} {s:>5} {l:>5} {up:>10} {tot:>11} {nxt:>6} {bar}{r}",
             d = c_dim(c),
             r = c.reset(),
             name = name,
@@ -993,7 +1020,7 @@ fn render_torrent_row(tv: &crate::ui::snapshot::TorrentView, c: &Caps, inner: us
             nxt = "-",
             bar = progress_bar(0, 1, bar_w, c),
         );
-        let vis = name_w + 1 + 4 + 1 + 4 + 1 + 10 + 1 + 11 + 1 + 6 + 1 + bar_w + 1;
+        let vis = name_w + 1 + 5 + 1 + 5 + 1 + 10 + 1 + 11 + 1 + 6 + 1 + bar_w + 1;
         return (txt, vis.min(body_w));
     }
 
@@ -1040,7 +1067,7 @@ fn render_torrent_row(tv: &crate::ui::snapshot::TorrentView, c: &Caps, inner: us
     let name_vis = 2 + dwidth(&name); // dot + space + name
     let pad = name_w.saturating_sub(name_vis);
     let txt = format!(
-        "{name_field}{namepad} {s}{sv:>4}{r} {l}{lv:>4}{r} {up}{spd:>10}{r} {tot:>11} {nxt}{nv:>6}{r} {bar}",
+        "{name_field}{namepad} {s}{sv:>5}{r} {l}{lv:>5}{r} {up}{spd:>10}{r} {tot:>11} {nxt}{nv:>6}{r} {bar}",
         name_field = name_field,
         namepad = " ".repeat(pad),
         s = c_ok(c),
@@ -1056,7 +1083,7 @@ fn render_torrent_row(tv: &crate::ui::snapshot::TorrentView, c: &Caps, inner: us
         bar = bar,
     );
     let _ = dot_ascii;
-    let vis = name_w + 1 + 4 + 1 + 4 + 1 + 10 + 1 + 11 + 1 + 6 + 1 + bar_w + 1;
+    let vis = name_w + 1 + 5 + 1 + 5 + 1 + 10 + 1 + 11 + 1 + 6 + 1 + bar_w + 1;
     (txt, vis.min(body_w))
 }
 
@@ -1101,8 +1128,8 @@ fn bar_width(inner: usize) -> usize {
 
 /// Width of the torrent-name column given the fixed numeric columns + bar.
 fn name_col(inner: usize, bar_w: usize) -> usize {
-    // fixed: S(4) L(4) speed(10) uploaded(11) next(6) + 5 separators + bar + 1
-    let fixed = 4 + 4 + 10 + 11 + 6 + 5 + bar_w + 1;
+    // fixed: S(5) L(5) speed(10) uploaded(11) next(6) + 5 separators + bar + 1
+    let fixed = 5 + 5 + 10 + 11 + 6 + 5 + bar_w + 1;
     inner.saturating_sub(2).saturating_sub(fixed).clamp(8, 40)
 }
 

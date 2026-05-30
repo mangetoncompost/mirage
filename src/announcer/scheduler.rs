@@ -53,8 +53,10 @@ pub async fn run(wait_time: u64) {
             list.iter().cloned().collect()
         };
         let next_interval = {
-            // Compute minimum time until next announce across all torrents
-            let mut min_interval = u64::MAX;
+            // Compute minimum time until next announce across all torrents.
+            // Use Option<u64> so None ("no torrents / nothing pending") is
+            // distinct from Some(0) ("a torrent is overdue right now").
+            let mut min_interval: Option<u64> = None;
             for m in handles.iter() {
                 let mut t = m.lock().await;
                 let elapsed = t.last_announce.elapsed().as_secs();
@@ -74,7 +76,10 @@ pub async fn run(wait_time: u64) {
                     // DOWNLOADING: tick on the short cadence, advance progress, and
                     // re-announce with the partial downloaded/left (or `completed`
                     // on the call that finishes the download).
-                    if elapsed >= dl_interval(&t) {
+                    // Compute dl_interval once so both the tick-gate and the
+                    // sleep-target use the same jitter-sampled value.
+                    let di = dl_interval(&t);
+                    if elapsed >= di {
                         let completed_now = t.advance_download();
                         // `completed` fires on the finishing call, or is retried
                         // (is_seeding && !completed_sent) if a prior one failed.
@@ -86,15 +91,17 @@ pub async fn run(wait_time: u64) {
                         debug!(torrent = %t.name, ?ev, "⤓ download tick");
                         super::tracker::announce(&mut t, ev).await;
                     }
-                    let nxt = dl_interval(&t).saturating_sub(t.last_announce.elapsed().as_secs());
-                    min_interval = u64::min(min_interval, nxt.max(1));
+                    let nxt = di.saturating_sub(t.last_announce.elapsed().as_secs());
+                    let v = nxt.max(1);
+                    min_interval = Some(min_interval.map_or(v, |m| m.min(v)));
                 } else if !t.completed_sent {
                     // SEEDING but a `completed` still needs to land (it failed
                     // earlier): retry it now, then resume normal cadence.
                     debug!(torrent = %t.name, "↻ retrying completed");
                     super::tracker::announce(&mut t, Some(Event::Completed)).await;
                     super::tracker::apply_recheck(&mut t);
-                    min_interval = u64::min(min_interval, t.interval.max(1));
+                    let v = t.interval.max(1);
+                    min_interval = Some(min_interval.map_or(v, |m| m.min(v)));
                 } else {
                     // SEEDING, completed delivered: the original behaviour.
                     if t.should_announce() {
@@ -103,14 +110,16 @@ pub async fn run(wait_time: u64) {
                         super::tracker::apply_recheck(&mut t);
                     }
                     let e = t.last_announce.elapsed().as_secs();
-                    min_interval = u64::min(min_interval, t.interval.saturating_sub(e));
+                    // Use .max(1) so an overdue/failed torrent (saturating_sub→0)
+                    // contributes 1 rather than the ambiguous 0 sentinel.
+                    let v = t.interval.saturating_sub(e).max(1);
+                    min_interval = Some(min_interval.map_or(v, |m| m.min(v)));
                 }
             }
-            // Ensure we don't sleep forever if no torrents or all have 0 interval
-            if min_interval == u64::MAX || min_interval == 0 {
-                wait_time
-            } else {
-                add_jitter(min_interval)
+            // None = no torrents at all → fall back to wait_time.
+            match min_interval {
+                None => wait_time,
+                Some(v) => add_jitter(v),
             }
         };
         // Floor the sleep so a collapsed/zero interval can't busy-spin the loop

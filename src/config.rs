@@ -118,50 +118,47 @@ impl Config {
                 };
 
                 if let Some(pid) = root_table.get("use_pid_file") {
-                    if let Some(pid) = pid.as_bool() {
-                        config.use_pid_file = pid;
+                    if let Some(v) = pid.as_bool() {
+                        config.use_pid_file = v;
                     } else {
-                        error!("use_pid_file is not an integer");
+                        error!("use_pid_file is not a boolean");
                     }
-                    match bool::from_str(&pid.to_string()) {
-                        Ok(value) => config.use_pid_file = value,
-                        Err(e) => {
-                            error!("Invalid use_pid: {e}");
-                            return config;
-                        }
-                    }
+                    // Note: the redundant bool::from_str fallback has been removed —
+                    // as_bool() is authoritative for TOML boolean values.
                 }
 
-                if let Some(speed) = root_table.get("min_upload_rate") {
-                    if let Some(value) = speed.as_integer() {
-                        config.min_upload_rate = value as u32;
+                // Rate fields: validate range [0, u32::MAX] and fall through on
+                // bad input (don't return early — later valid fields would be lost).
+                let parse_rate = |label: &str, v: i64| -> Option<u32> {
+                    if (0..=(u32::MAX as i64)).contains(&v) {
+                        Some(v as u32)
                     } else {
-                        error!("Invalid min upload rate");
-                        return config;
+                        error!("{label} out of range [0, {}]: {v}", u32::MAX);
+                        None
+                    }
+                };
+                if let Some(speed) = root_table.get("min_upload_rate") {
+                    match speed.as_integer() {
+                        Some(v) => { if let Some(r) = parse_rate("min_upload_rate", v) { config.min_upload_rate = r; } }
+                        None => error!("min_upload_rate is not an integer"),
                     }
                 }
                 if let Some(speed) = root_table.get("max_upload_rate") {
-                    if let Some(value) = speed.as_integer() {
-                        config.max_upload_rate = value as u32;
-                    } else {
-                        error!("Invalid max upload rate");
-                        return config;
+                    match speed.as_integer() {
+                        Some(v) => { if let Some(r) = parse_rate("max_upload_rate", v) { config.max_upload_rate = r; } }
+                        None => error!("max_upload_rate is not an integer"),
                     }
                 }
                 if let Some(speed) = root_table.get("min_download_rate") {
-                    if let Some(value) = speed.as_integer() {
-                        config.min_download_rate = value as u32;
-                    } else {
-                        error!("Invalid min download rate");
-                        return config;
+                    match speed.as_integer() {
+                        Some(v) => { if let Some(r) = parse_rate("min_download_rate", v) { config.min_download_rate = r; } }
+                        None => error!("min_download_rate is not an integer"),
                     }
                 }
                 if let Some(speed) = root_table.get("max_download_rate") {
-                    if let Some(value) = speed.as_integer() {
-                        config.max_download_rate = value as u32;
-                    } else {
-                        error!("Invalid max download rate");
-                        return config;
+                    match speed.as_integer() {
+                        Some(v) => { if let Some(r) = parse_rate("max_download_rate", v) { config.max_download_rate = r; } }
+                        None => error!("max_download_rate is not an integer"),
                     }
                 }
 

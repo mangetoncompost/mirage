@@ -2,7 +2,7 @@
 // https://www.bittorrent.org/beps/bep_0015.html
 use fake_torrent_client::Client;
 use std::net::SocketAddr;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
@@ -184,13 +184,19 @@ impl UdpTracker {
                 let received_transaction_id =
                     u32::from_be_bytes([buffer[4], buffer[5], buffer[6], buffer[7]]);
 
-                // Vérifier si c'est une erreur
+                // Validate transaction id first (before branching on action) so a
+                // stray/forged packet with action==3 but a wrong tx-id is rejected
+                // as InvalidResponse rather than surfaced as a tracker error message.
+                if received_transaction_id != transaction_id {
+                    return Err(TrackerError::InvalidResponse);
+                }
+
                 if action == 3 {
                     let error_msg = String::from_utf8_lossy(&buffer[8..bytes_received]);
                     return Err(TrackerError::TrackerError(error_msg.to_string()));
                 }
 
-                if action != ANNOUNCE_ACTION || received_transaction_id != transaction_id {
+                if action != ANNOUNCE_ACTION {
                     return Err(TrackerError::InvalidResponse);
                 }
 
@@ -229,8 +235,9 @@ impl UdpTracker {
     }
 
     fn generate_transaction_id(&self) -> u32 {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-        (now.as_secs() as u32).wrapping_add(now.subsec_nanos())
+        // fastrand is already a project dep and cannot panic; using it instead of
+        // SystemTime avoids a panic when the system clock is before UNIX_EPOCH.
+        fastrand::u32(..)
     }
 }
 
@@ -261,7 +268,7 @@ async fn resolve_tracker_addr(url: &str) -> Result<SocketAddr, TrackerError> {
         .ok_or_else(|| TrackerError::TrackerError(format!("Could not resolve hostname: {}", host)))
 }
 
-pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, event: Option<Event>) {
+pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, event: Option<Event>, pre_loop_uploaded: u64) {
     debug!("UDP announce to {}", url);
 
     // Resolve tracker address
@@ -286,17 +293,9 @@ pub async fn announce_udp(url: &str, torrent: &mut Torrent, client: &Client, eve
         }
     };
 
-    // Declared upload = exact integral of the time-varying speed curve over the
-    // window since the last announce (same model as the HTTP path). STARTED and
-    // COMPLETED declare 0 (just started / just finished downloading, not seeding
-    // yet). Window derived from last_announce → idempotent per announce.
-    let uploaded: u64 = if matches!(event, Some(Event::Started) | Some(Event::Completed)) {
-        0
-    } else {
-        let t1 = torrent.origin.elapsed().as_secs_f64();
-        let t0 = (t1 - torrent.last_announce.elapsed().as_secs_f64()).max(0.0);
-        torrent.integrate(t0, t1).round().max(0.0) as u64
-    };
+    // Upload to declare: use the pre-computed value snapshotted before the per-URL
+    // loop in announce(), so every tracker in the list gets the same window.
+    let uploaded: u64 = pre_loop_uploaded;
 
     // Convert peer_id to fixed-size array
     let peer_id_bytes = client.peer_id.as_bytes();

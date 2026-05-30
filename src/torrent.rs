@@ -272,7 +272,9 @@ impl Torrent {
 
     pub fn uploaded(&mut self, min_speed: u32, available_speed: u32) -> u32 {
         if self.can_upload() && (0 < min_speed && min_speed <= available_speed) {
-            self.next_upload_speed = fastrand::u32(min_speed..available_speed);
+            // Inclusive upper bound: min_speed..=available_speed prevents an empty
+            // range panic when min_speed == available_speed.
+            self.next_upload_speed = fastrand::u32(min_speed..=available_speed);
             self.next_upload_speed
         } else {
             0
@@ -284,7 +286,10 @@ impl Torrent {
         // current instantaneous value of the curve, kept for legacy JSON/log
         // output (the declared bytes come from `integrate`, not this field).
         let t = self.origin.elapsed().as_secs_f64();
-        let speed = self.speed_at(t).round() as u32;
+        // Clamp explicitly before the float→u32 cast: with max_upload_rate near
+        // u32::MAX and the 8× multiplier, speed_at can return ~3.4e10 which Rust
+        // saturates to u32::MAX, silently pinning the display value.
+        let speed = self.speed_at(t).round().min(u32::MAX as f64) as u32;
         self.next_upload_speed = speed;
         let config = crate::CONFIG.load();
         trace!(
@@ -385,7 +390,8 @@ impl Torrent {
     // }
 
     pub fn from_file(path: PathBuf) -> Result<Self, TorrentError> {
-        let data = std::fs::read(&path).expect("Cannot read torrent file");
+        let data = std::fs::read(&path)
+            .map_err(|e| TorrentError::ParseError(format!("cannot read {}: {e}", path.display())))?;
         let mut torrent = Self::from_bencode_bytes(&data)?;
         torrent.source_path = Some(path);
         Ok(torrent)
@@ -418,16 +424,14 @@ impl Torrent {
             "downloading"
         });
         result.push_str("\", \"urls\": [");
-        let count = self.urls.len();
         for (index, url) in self.urls.iter().enumerate() {
-            result.push_str(&format!("\"{url}\""));
-            if (index + 1) < count {
+            if index > 0 {
                 result.push_str(", ");
-            } else {
-                result.push_str("]}\n");
             }
+            result.push_str(&format!("\"{url}\""));
         }
-        // TODO: add info hash?
+        // Close unconditionally so an empty urls list produces valid JSON.
+        result.push_str("]}\n");
         result
     }
 

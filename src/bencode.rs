@@ -117,15 +117,15 @@ impl<'a> BencodeDecoder<'a> {
         let len_str = str::from_utf8(len_slice)?;
         let len: usize = len_str.parse()?;
 
-        if self.position + len > self.data.len() {
-            return Err(BencodeDecoderError::UnexpectedEndOfInput);
-        }
+        let end = self
+            .position
+            .checked_add(len)
+            .filter(|&e| e <= self.data.len())
+            .ok_or(BencodeDecoderError::UnexpectedEndOfInput)?;
 
         let start = self.position;
-        self.position += len;
-        Ok(BencodeValue::ByteString(
-            self.data[start..self.position].to_vec(),
-        ))
+        self.position = end;
+        Ok(BencodeValue::ByteString(self.data[start..end].to_vec()))
     }
 
     /// Decodes a list (l<element1><element2>...e).
