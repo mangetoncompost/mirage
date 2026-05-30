@@ -256,10 +256,8 @@ impl Torrent {
             return false;
         }
         // F2.2 ratio cap: if a target was set and already met, stop uploading.
-        if let Some(target) = self.upload_target {
-            if self.uploaded >= target {
-                return false;
-            }
+        if self.upload_target.is_some_and(|t| self.uploaded >= t) {
+            return false;
         }
         (self.seeders > 0 && self.leechers > 0) || self.leechers > 1
     }

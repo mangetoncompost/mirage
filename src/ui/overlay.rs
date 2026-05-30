@@ -137,8 +137,9 @@ pub fn close_detail() {
     }
 }
 pub fn detail_hash() -> Option<[u8; 20]> {
-    DETAIL_HASH.lock().ok()?.and_then(|h| Some(h))
+    *DETAIL_HASH.lock().ok()?
 }
+#[allow(dead_code)]
 pub fn cycle_detail_sub() {
     let cur = DETAIL_SUB.load(Ordering::Relaxed);
     DETAIL_SUB.store(if cur == 0 { 1 } else { 0 }, Ordering::Relaxed);

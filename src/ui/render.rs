@@ -501,13 +501,13 @@ pub fn build_frame(
         // Right-aligned hint. When celebrating a ratio milestone (F1.3) the
         // hint is replaced by a festive label; the spinner's parity provides the
         // blink — `build_frame` stays deterministic for a given Frame snapshot.
-        let (hint, hint_vis): (String, usize) = if f.celebrate && f.spinner % 2 == 0 {
+        let (hint, hint_vis): (String, usize) = if f.celebrate && f.spinner.is_multiple_of(2) {
             let lbl = format!("★ {} ★", f.celebrate_label);
             let vis = dwidth(&lbl);
             (format!("{}{lbl}{}", c_warn(&c), c.reset()), vis)
         } else {
             let lbl = "←→ tabs · ? help · q quit";
-            (format!("{lbl}"), dwidth(lbl))
+            (lbl.to_string(), dwidth(lbl))
         };
         let avail = inner.saturating_sub(2);
         let used = dwidth(&plain);
@@ -740,6 +740,7 @@ fn build_help(out: &mut String, c: &Caps, inner: usize, term_h: usize, line: &Li
 /// "› " (cyan caret) when selected, else two spaces. `content` is already sized
 /// for `table_body_w` (the bordered area minus the gutter), so gutter + content
 /// fits the row exactly and the columns line up under the header.
+#[allow(clippy::too_many_arguments)]
 fn emit_row(
     out: &mut String,
     c: &Caps,
@@ -1669,7 +1670,7 @@ fn build_palette(out: &mut String, c: &Caps, inner: usize, term_h: usize, line: 
 
     // Separator.
     let sep_char = if c.utf8 { "─" } else { "-" };
-    let sep: String = std::iter::repeat(sep_char).take(inner.saturating_sub(4)).collect();
+    let sep = sep_char.repeat(inner.saturating_sub(4));
     line(out, &format!("{d} {sep}{r}", d = c_dim(c), r = c.reset()), 1 + dwidth(&sep));
 
     let budget = term_h.saturating_sub(6).min(matches.len());
@@ -1857,7 +1858,7 @@ fn build_ratio(out: &mut String, f: &Frame, c: &Caps, inner: usize, line: &Line)
             let (glyph, col) = if v >= threshold {
                 (if c.utf8 { "▆" } else { "#" }, c_ok(c))
             } else {
-                (if c.utf8 { " " } else { " " }, c_dim(c))
+                (" ", c_dim(c))
             };
             graph_row.push_str(&col);
             graph_row.push_str(glyph);
@@ -1871,7 +1872,7 @@ fn build_ratio(out: &mut String, f: &Frame, c: &Caps, inner: usize, line: &Line)
     let axis = {
         let mut s = format!("{d}{:>label_w$} ", "", d = c_dim(c), label_w = label_w);
         for _ in 0..graph_w {
-            s.push_str("─");
+            s.push('─');
         }
         s.push_str(c.reset());
         s
