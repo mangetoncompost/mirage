@@ -34,7 +34,27 @@ static STARTED: OnceCell<chrono::DateTime<chrono::Utc>> = OnceCell::const_new();
 /// until set in main.
 static CONFIG: Lazy<ArcSwap<Config>> = Lazy::new(|| ArcSwap::from_pointee(Config::default()));
 static CLIENT: RwLock<Option<Client>> = RwLock::const_new(None);
-static TORRENTS: RwLock<Vec<Mutex<Torrent>>> = RwLock::const_new(Vec::new()); // TODO: replace with mutex
+/// Torrents are `Arc<Mutex<…>>` so the scheduler can clone the handles out under
+/// a short read lock and then announce (network I/O) holding ONLY each torrent's
+/// own mutex — never the outer `TORRENTS` read lock across an await. That keeps a
+/// `TORRENTS.write()` (add/remove) from freezing the announce loop + UI.
+static TORRENTS: RwLock<Vec<Arc<Mutex<Torrent>>>> = RwLock::const_new(Vec::new());
+
+/// Handle of the currently-running key-renewer task. Replacing the client
+/// (`k` → ReinitClient) aborts the old renewer before spawning a new one, so we
+/// don't leak an immortal renewer task per re-init.
+static RENEWER: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>> =
+    std::sync::Mutex::new(None);
+
+/// Spawn the key renewer, aborting any previous one first. Safe to call repeatedly.
+pub(crate) fn spawn_key_renewer(refresh_every: u16) {
+    if let Ok(mut g) = RENEWER.lock() {
+        if let Some(old) = g.take() {
+            old.abort();
+        }
+        *g = Some(tokio::spawn(run_key_renewer(refresh_every)));
+    }
+}
 
 async fn run_key_renewer(refresh_every: u16) {
     loop {
@@ -72,7 +92,7 @@ pub(crate) fn parse_cli_args() -> Option<PathBuf> {
 }
 
 pub(crate) fn get_config_from_xdg() -> Option<PathBuf> {
-    let xdg = xdg::BaseDirectories::with_prefix("RatioUp");
+    let xdg = xdg::BaseDirectories::with_prefix("Mirage");
     match xdg.place_config_file("config.toml") {
         Ok(path) => return Some(path),
         Err(e) => tracing::error!("Cannot create config file: {e}"),
@@ -81,7 +101,7 @@ pub(crate) fn get_config_from_xdg() -> Option<PathBuf> {
 }
 
 /// Entry point: the live super-shell dashboard on an interactive terminal, else
-/// classic `tracing` logs (see `ui::should_use_tui`). The macOS RatioUp.app
+/// classic `tracing` logs (see `ui::should_use_tui`). The macOS Mirage.app
 /// (scripts/make_app.sh) just opens this in Terminal.app.
 #[tokio::main]
 async fn main() {
@@ -145,7 +165,7 @@ async fn main() {
 
     // schedule client refresh key if applicable
     if let Some(refresh_every) = config::init_client(&config).await {
-        tokio::spawn(run_key_renewer(refresh_every));
+        spawn_key_renewer(refresh_every);
     }
 
     directory::prepare_torrent_folder(config.torrent_dir.clone()).await;
@@ -192,7 +212,7 @@ async fn main() {
     tokio::spawn(async move {
         // Graceful exit on Ctrl+C (SIGINT, or the q / Ctrl+C-as-key the dashboard
         // reads under raw mode), AND on SIGTERM (`kill`) / SIGHUP (the Terminal
-        // window is closed) — so closing the RatioUp.app window still restores
+        // window is closed) — so closing the Mirage.app window still restores
         // the terminal, announces STOPPED and saves state.
         #[cfg(unix)]
         {
@@ -220,7 +240,14 @@ async fn main() {
         let _ = sd_tx.send(true);
         ui::draw::restore();
         info!("Exiting...");
-        announcer::tracker::announce_stopped().await;
+        // Bound the STOPPED announce: it hits every tracker serially (up to ~60s
+        // HTTP / 30s UDP each), so a hung tracker must not delay exit forever.
+        // State is persisted regardless of whether the announce completed.
+        let _ = tokio::time::timeout(
+            Duration::from_secs(8),
+            announcer::tracker::announce_stopped(),
+        )
+        .await;
         // Persist final download phase so the next launch resumes correctly.
         let _ = state::save().await;
         if config.use_pid_file && pid_file.is_some() {
@@ -233,7 +260,7 @@ async fn main() {
 }
 
 async fn write_pid_file() -> Option<PathBuf> {
-    match xdg::BaseDirectories::new().place_runtime_file("ratio_up.pid") {
+    match xdg::BaseDirectories::new().place_runtime_file("mirage.pid") {
         Ok(file) => {
             match tokio::fs::write(file.clone(), std::process::id().to_string().as_bytes()).await {
                 Ok(_) => Some(file),
@@ -265,7 +292,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_torrent_directory() {
         let mut dir = env::temp_dir();
-        dir.push("ratioup-test-torrents-dir");
+        dir.push("mirage-test-torrents-dir");
         if dir.is_dir() {
             let _ = std::fs::remove_dir(dir.clone());
         }

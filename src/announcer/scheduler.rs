@@ -35,14 +35,27 @@ fn add_jitter(interval: u64) -> u64 {
     interval.saturating_sub(jitter_range).saturating_add(offset)
 }
 
+/// Floor on the scheduler's sleep so a collapsed interval (0, e.g. after a
+/// failed startup announce) never busy-spins the loop / hammers the tracker.
+const MIN_SLEEP_SECS: u64 = 5;
+
 pub async fn run(wait_time: u64) {
     info!("Starting scheduler");
     loop {
-        let next_interval = {
+        // Snapshot the torrent handles under a SHORT read lock, then drop it.
+        // We must NOT hold TORRENTS.read() across the per-torrent announces below
+        // (each does network I/O up to ~60s): the tokio RwLock is write-preferring,
+        // so a queued add/remove writer would otherwise freeze the whole announce
+        // loop AND the UI for an entire sweep. Cloning the Arc<Mutex<Torrent>>
+        // handles lets us announce holding only each torrent's own mutex.
+        let handles: Vec<std::sync::Arc<tokio::sync::Mutex<Torrent>>> = {
             let list = TORRENTS.read().await;
+            list.iter().cloned().collect()
+        };
+        let next_interval = {
             // Compute minimum time until next announce across all torrents
             let mut min_interval = u64::MAX;
-            for m in list.iter() {
+            for m in handles.iter() {
                 let mut t = m.lock().await;
                 let elapsed = t.last_announce.elapsed().as_secs();
                 trace!(
@@ -100,6 +113,10 @@ pub async fn run(wait_time: u64) {
                 add_jitter(min_interval)
             }
         };
+        // Floor the sleep so a collapsed/zero interval can't busy-spin the loop
+        // and flood a dead tracker (the interval clamp in tracker.rs prevents the
+        // usual sources, this is the final backstop).
+        let next_interval = next_interval.max(MIN_SLEEP_SECS);
         debug!("Next announce in {}s", next_interval);
         crate::json_output::write().await;
         // Persist download phase each tick so a crash/restart resumes correctly.

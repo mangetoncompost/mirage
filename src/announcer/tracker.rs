@@ -9,6 +9,23 @@ use reqwest::Client as ReqwestClient;
 use tracing::{debug, error, info, trace, warn};
 use url::{Host, Url};
 
+/// Sane bounds for a tracker-supplied announce interval (seconds). The value is
+/// a fully untrusted i64 from the tracker response: a negative number would cast
+/// to ~u64::MAX (wedging the torrent's announce forever) and 0 would busy-spin
+/// the scheduler. Clamp to [30s, 24h]; out-of-range / non-positive → 30 min.
+pub const MIN_INTERVAL: u64 = 30;
+pub const MAX_INTERVAL: u64 = 86_400;
+const DEFAULT_INTERVAL: u64 = 1_800;
+
+/// Clamp a tracker-supplied interval into the safe range.
+pub fn clamp_interval(raw: i64) -> u64 {
+    if raw <= 0 {
+        DEFAULT_INTERVAL
+    } else {
+        (raw as u64).clamp(MIN_INTERVAL, MAX_INTERVAL)
+    }
+}
+
 // pub fn print_request_error(code: u16) {
 //     match code {
 //         100 => error!("100 Invalid request, not a GET"),
@@ -365,7 +382,7 @@ async fn announce_http(
     // Inject the key as 8 uppercase hex (constant per session), like a real
     // Transmission — not the decimal `client.key.to_string()` used before.
     let key_hex = crate::config::KEY_HEX.load().as_str().to_string();
-    let (built_url, uploaded) = build_url(url, torrent, event, key_hex).await;
+    let (built_url, uploaded) = build_url(url, torrent, client, event, key_hex).await;
     info!("Announce HTTP URL {built_url}");
 
     let mut request_builder = reqwest_client.get(&built_url);
@@ -389,7 +406,7 @@ async fn announce_http(
                 Err(e) => {
                     error!("Failed to read response bytes: {:?}", e);
                     emit(EventKind::Error, &torrent.name, format!("body read: {e}"));
-                    torrent.error_count += 1;
+                    torrent.error_count = torrent.error_count.saturating_add(1);
                     return torrent.interval; // return current interval
                 }
             };
@@ -419,7 +436,7 @@ async fn announce_http(
                                     &torrent.name,
                                     format!("tracker: {}", String::from_utf8_lossy(msg)),
                                 );
-                                torrent.error_count += 1;
+                                torrent.error_count = torrent.error_count.saturating_add(1);
                             } else {
                                 // Check for warning message (response still gets processed normally)
                                 if let Some(BencodeValue::ByteString(msg)) =
@@ -433,14 +450,17 @@ async fn announce_http(
                                 if let Some(BencodeValue::Integer(interval)) =
                                     dict.get(b"interval".as_ref())
                                 {
-                                    torrent.interval = *interval as u64;
+                                    // Clamp the tracker-supplied (fully untrusted, i64) interval:
+                                    // a negative value casts to ~u64::MAX and would wedge this
+                                    // torrent's announce forever; 0 would busy-spin the scheduler.
+                                    torrent.interval = clamp_interval(*interval);
                                 }
 
                                 // (optional) Minimum announce interval. If present clients must not reannounce more frequently than this.
                                 if let Some(BencodeValue::Integer(mi)) =
                                     dict.get(b"min interval".as_ref())
                                 {
-                                    torrent.min_interval = Some(*mi as u64);
+                                    torrent.min_interval = Some(clamp_interval(*mi));
                                 }
 
                                 // A string that the client should send back on its next announcements. If absent and
@@ -463,7 +483,7 @@ async fn announce_http(
                                 //     ship a `peers` list/blob → we must COUNT it;
                                 //   - they send the counts as STRINGS not integers;
                                 //   - they ship IPv6 peers in `peers6`.
-                                // RatioUp used to read only the integer keys and
+                                // Mirage used to read only the integer keys and
                                 // ignore `peers`, so such trackers showed L:0 and
                                 // never uploaded. We now take the MAX of the
                                 // declared count and the actual peer count.
@@ -519,21 +539,21 @@ async fn announce_http(
                         _ => {
                             error!("Response is not a dictionary");
                             emit(EventKind::Error, &torrent.name, "not a dictionary");
-                            torrent.error_count += 1;
+                            torrent.error_count = torrent.error_count.saturating_add(1);
                         }
                     }
                 }
                 Err(e) => {
                     error!("Bad response with HTTP status {status}: {:?}", e);
                     emit(EventKind::Error, &torrent.name, format!("decode (HTTP {status})"));
-                    torrent.error_count += 1;
+                    torrent.error_count = torrent.error_count.saturating_add(1);
                 }
             }
         }
         Err(err) => {
             error!("Cannot announce: {:?}", err);
             emit(EventKind::Error, &torrent.name, format!("HTTP fail: {err}"));
-            torrent.error_count += 1;
+            torrent.error_count = torrent.error_count.saturating_add(1);
         }
     }
     if let Some(min) = torrent.min_interval
@@ -551,6 +571,7 @@ async fn announce_http(
 pub async fn build_url(
     url: &str,
     torrent: &mut Torrent,
+    client: &Client,
     event: Option<Event>,
     key: String,
 ) -> (String, u64) {
@@ -571,8 +592,11 @@ pub async fn build_url(
         torrent.integrate(t0, t1).round().max(0.0) as u64
     };
 
-    //build URL list
-    let client = (*CLIENT.read().await).clone().unwrap();
+    // The caller (announce → announce_http) already holds the CLIENT read guard
+    // and passes the borrow down. We must NOT re-acquire CLIENT.read() here: the
+    // tokio RwLock is write-preferring, so a key-renewer/ReinitClient writer that
+    // queues between the outer read (in announce) and a read here would deadlock
+    // the announce task forever.
     let cfg = CONFIG.load();
     let port = cfg.port;
     // numwant = 0 on STOPPED (like a real Transmission), else the config override
@@ -617,7 +641,14 @@ pub async fn build_url(
         .replace("{peerid}", &client.peer_id)
         .replace("{port}", &port.to_string())
         .replace("{numwant}", &numwant.to_string())
+        // Strip the ipv6 param robustly (we don't announce an IPv6 address):
+        // the param with a leading or trailing separator, then the bare token,
+        // like the {event} strip above. A leftover {ipv6} would otherwise ship a
+        // literal placeholder to the tracker if the client template changes.
+        .replace("&ipv6={ipv6}", "")
+        .replace("ipv6={ipv6}&", "")
         .replace("ipv6={ipv6}", "")
+        .replace("{ipv6}", "")
         .replace("{left}", &torrent.declared_left().to_string());
     // info!(
     //     "\tUploaded: {}",
@@ -634,6 +665,19 @@ pub async fn build_url(
 mod tests {
     use super::*;
     use crate::bencode::BencodeDecoder;
+
+    #[test]
+    fn interval_clamp_rejects_hostile_values() {
+        // Negative would cast to ~u64::MAX (permanent wedge) → default.
+        assert_eq!(clamp_interval(-1), DEFAULT_INTERVAL);
+        // Zero would busy-spin the scheduler → default.
+        assert_eq!(clamp_interval(0), DEFAULT_INTERVAL);
+        // Too small → floored; too large → capped.
+        assert_eq!(clamp_interval(1), MIN_INTERVAL);
+        assert_eq!(clamp_interval(10_000_000), MAX_INTERVAL);
+        // A normal value passes through.
+        assert_eq!(clamp_interval(1800), 1800);
+    }
 
     /// Decode a bencode dict and extract (seeders, leechers) the way announce_http
     /// now does, so we can assert the robust parsing across real-world tracker

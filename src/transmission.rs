@@ -5,7 +5,7 @@
 //! Transmission of that version — peer_id prefix `-TR<m><n><p>0-`, User-Agent
 //! `Transmission/<ver>`, the captured query template & header set, a constant
 //! 8-hex-uppercase session key, and `numwant=0` on stop. When Transmission is
-//! updated, RatioUp follows automatically on the next launch.
+//! updated, Mirage follows automatically on the next launch.
 //!
 //! Ground truth: a captured announce from Transmission 4.1.1 —
 //!   peer_id=-TR4110-bf0dd2puquxi, User-Agent: Transmission/4.1.1,

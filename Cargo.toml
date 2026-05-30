@@ -1,12 +1,12 @@
 [package]
-name = "RatioUp"
+name = "mirage"
 authors = ["mangetoncompost"]
 version = "1.0.0"
 edition = "2024"
 keywords = ["torrent", "ratio", "upload", "cli"]
 description = "CLI tool to fake your torrent upload in order to increase your ratio."
 
-# macOS launcher: scripts/make_app.sh wraps the release binary in a RatioUp.app
+# macOS launcher: scripts/make_app.sh wraps the release binary in a Mirage.app
 # that opens the live dashboard in Terminal.app. No GUI deps, no cargo bundle.
 
 [dependencies]

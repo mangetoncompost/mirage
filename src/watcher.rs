@@ -128,25 +128,24 @@ async fn handle_file_added(path: PathBuf) {
         return;
     }
 
-    // Check for duplicates
-    {
-        let list = TORRENTS.read().await;
-        for m in list.iter() {
-            let t = m.lock().await;
-            if t.info_hash_urlencoded == torrent.info_hash_urlencoded {
-                warn!("Torrent with same hash already exists: {}", torrent.name);
-                return;
-            }
-        }
-    }
-
     let name = torrent.name.clone();
     let info_hash = torrent.info_hash_urlencoded.clone();
 
-    // Add to the list
+    // Dedup-check and insert atomically under ONE write lock. Doing the check
+    // under a read lock and the push under a separate write lock (with locks
+    // dropped between) let two rapid Create events for the same file (editors /
+    // rsync emit several) both pass the check and double-insert — which would
+    // declare 2× upload for one info-hash and read as cheating to the tracker.
     {
         let mut list = TORRENTS.write().await;
-        list.push(Mutex::new(torrent));
+        for m in list.iter() {
+            let t = m.lock().await;
+            if t.info_hash_urlencoded == info_hash {
+                warn!("Torrent with same hash already exists: {name}");
+                return;
+            }
+        }
+        list.push(std::sync::Arc::new(Mutex::new(torrent)));
     }
 
     // Announce with STARTED event

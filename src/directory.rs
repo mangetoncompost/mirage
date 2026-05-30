@@ -19,7 +19,15 @@ pub async fn prepare_torrent_folder(directory: PathBuf) {
 ///
 /// Add a torrent to the list. If the filename does not end with .torrent, the file is not processed.
 pub async fn load_torrents(directory: PathBuf) -> u16 {
-    let paths = std::fs::read_dir(&directory).expect("Cannot read torrent directory");
+    // Graceful: an unreadable dir (permissions, removed/unmounted share) returns
+    // 0 instead of panicking at startup (which could strand the alt screen).
+    let paths = match std::fs::read_dir(&directory) {
+        Ok(p) => p,
+        Err(e) => {
+            error!("Cannot read torrent directory {}: {e}", directory.display());
+            return 0;
+        }
+    };
     let mut count = 0u16;
     let list = &mut *TORRENTS.write().await;
     let mut added_hashes: Vec<String> = Vec::new();
@@ -27,7 +35,13 @@ pub async fn load_torrents(directory: PathBuf) -> u16 {
     // restart resumes instead of re-downloading from scratch.
     let state = crate::state::load_dict();
     for p in paths {
-        let path = p.expect("Cannot get torrent path").path();
+        let path = match p {
+            Ok(entry) => entry.path(),
+            Err(e) => {
+                warn!("Skipping unreadable directory entry: {e}");
+                continue;
+            }
+        };
         if let Some(extension) = path.clone().extension()
             && extension.eq_ignore_ascii_case("torrent")
         {
@@ -47,7 +61,7 @@ pub async fn load_torrents(directory: PathBuf) -> u16 {
                     } else {
                         crate::state::apply(&mut torrent, &state);
                         added_hashes.push(torrent.info_hash_urlencoded.clone());
-                        list.push(Mutex::new(torrent));
+                        list.push(std::sync::Arc::new(Mutex::new(torrent)));
                         count += 1;
                     }
                 }

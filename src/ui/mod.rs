@@ -1,10 +1,10 @@
-//! Live "super-shell" dashboard for RatioUp.
+//! Live "super-shell" dashboard for Mirage.
 //!
 //! On an interactive stdout we paint a full-screen dashboard (header with
 //! client/peer/key/uptime, one row per torrent with seeders/leechers/upload
 //! speed/total/countdown bar, a scrolling recent-events feed, and a totals
 //! footer), redrawn ~2.5×/s independently of the (possibly half-hourly)
-//! announce schedule. When stdout is piped/redirected — or `RATIOUP_NO_UI` is
+//! announce schedule. When stdout is piped/redirected — or `MIRAGE_NO_UI` is
 //! set — we fall back to the existing `tracing` logs unchanged.
 
 pub mod draw;
@@ -22,9 +22,9 @@ use std::time::Duration;
 use snapshot::{Frame, snapshot_client, snapshot_torrents};
 
 /// Use the live dashboard only on an interactive stdout, unless opted out via
-/// `RATIOUP_NO_UI` (which forces classic log mode even on a TTY).
+/// `MIRAGE_NO_UI` (which forces classic log mode even on a TTY).
 pub fn should_use_tui() -> bool {
-    if std::env::var_os("RATIOUP_NO_UI").is_some() {
+    if std::env::var_os("MIRAGE_NO_UI").is_some() {
         return false;
     }
     std::io::stdout().is_terminal()
