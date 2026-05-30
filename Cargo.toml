@@ -49,8 +49,10 @@ plist = "1"
 # lock-free swappable config/snapshot shared between the engine and the native GUI
 arc-swap = "1.9"
 
-# native macOS GUI (egui/eframe) — used only by the --gui entry path
+# native macOS GUI (egui/eframe) — used only by the --gui entry path.
+# The window is a REAL embedded terminal (egui_term = alacritty_terminal + egui)
+# that PTY-spawns this same binary in `--tty` mode, so the window is the shell
+# dashboard byte-for-byte. Pinned to a specific rev (egui_term is 0.1/git-only).
 eframe = { version = "0.34", default-features = false, features = ["wgpu", "default_fonts"] }
 egui = "0.34"
-egui_extras = "0.34"
-rfd = "0.17"
+egui_term = { git = "https://github.com/Harzu/egui_term", rev = "df910f2be512e67a8d2c4c21945f87718630041a" }

@@ -62,8 +62,8 @@ pub(crate) fn parse_cli_args() -> Option<PathBuf> {
                     tracing::error!("Missing value for -c/--config");
                 }
             }
-            // GUI flag is handled in main(); ignore it here silently.
-            "--gui" => {}
+            // GUI / TTY flags are handled in main(); ignore them here silently.
+            "--gui" | "--tty" => {}
             // Handle other arguments or positional arguments here
             other_arg => {
                 tracing::error!("Warning: Unknown argument: {}, Ignoring", other_arg);
@@ -82,10 +82,13 @@ pub(crate) fn get_config_from_xdg() -> Option<PathBuf> {
     None
 }
 
-/// Entry point: a native macOS GUI window when launched with `--gui` or from the
-/// .app bundle; otherwise the original CLI/TTY behavior, byte-for-byte.
+/// Entry point. The native GUI window (`--gui` or .app double-click) is a REAL
+/// embedded terminal that PTY-spawns THIS binary again with `--tty`; that child
+/// must take the CLI/TTY path even though it lives in the bundle, so `--tty`
+/// forces `run_cli()` and overrides the GUI/bundle detection (no recursion).
 fn main() {
-    let want_gui = std::env::args().any(|a| a == "--gui") || launched_from_bundle();
+    let force_tty = std::env::args().any(|a| a == "--tty");
+    let want_gui = !force_tty && (std::env::args().any(|a| a == "--gui") || launched_from_bundle());
     if want_gui {
         gui::run();
     } else {
@@ -184,6 +187,13 @@ async fn run_cli() {
     tokio::spawn(async move {
         watcher::watch_directory(watch_dir).await;
     });
+
+    // Engine command channel so the dashboard's per-torrent keys (force / remove
+    // / re-init client / save config, etc.) reach the running engine. Drained by
+    // the shared processor; `control::send` is a no-op until this is set.
+    let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel::<control::Cmd>();
+    let _ = control::CMD.set(cmd_tx);
+    tokio::spawn(engine::process_commands(cmd_rx));
 
     // Live dashboard render task (TTY only) + shutdown signal it listens on.
     let (sd_tx, sd_rx) = tokio::sync::watch::channel(false);

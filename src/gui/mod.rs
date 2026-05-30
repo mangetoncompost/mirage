@@ -1,57 +1,28 @@
-//! Native macOS GUI (eframe/egui). eframe owns the main thread (macOS requires
-//! UI on the main thread); the async RatioUp engine runs on a background tokio
-//! runtime. They share state through the lock-free `control` layer: the GUI
-//! reads `control::SNAPSHOT` each frame and sends `control::Cmd`s for mutations.
+//! Native macOS GUI (eframe/egui). The window is a REAL embedded terminal
+//! (`egui_term`, alacritty-backed) that PTY-spawns this binary again in `--tty`
+//! mode, so it renders the exact crossterm shell dashboard (src/ui) — same 9
+//! tabs, same colors, same keys — byte-for-byte. The engine therefore runs in
+//! the PTY CHILD process, not here; this process is a thin terminal host. See
+//! `term_app` for the details and the `--tty` recursion guard in `main()`.
 
-mod app;
-mod term;
-mod theme;
-mod views;
+mod term_app;
 
-use std::path::PathBuf;
-
-/// GUI entry point. Builds a background multi-thread tokio runtime, starts the
-/// engine on it, then runs eframe on the main thread.
+/// GUI entry point: run eframe on the main thread hosting the terminal widget.
+/// (No background engine here — the PTY child owns the engine.)
 pub fn run() {
-    // Logs go to stderr (visible when launched from a terminal); harmless in .app.
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_target(false)
-        .init();
-
-    // Config path: same resolution as the CLI (-c arg, else XDG).
-    let config_path: Option<PathBuf> = crate::parse_cli_args().or_else(crate::get_config_from_xdg);
-
-    // Background tokio runtime running the whole engine.
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("build tokio runtime");
-    std::thread::Builder::new()
-        .name("ratioup-engine".into())
-        .spawn(move || {
-            // The runtime is owned by this thread and outlives it via block_on.
-            rt.block_on(async move {
-                let config = crate::engine::load_config(config_path).await;
-                crate::engine::start(config).await;
-            });
-        })
-        .expect("spawn engine thread");
-
-    // eframe on the main thread.
-    // Window sized snugly to the monospace board (66 cols × 24 rows + REPL) so it
-    // reads like a small terminal with no empty space. Every view pads to the
-    // same height (see views::BOARD_ROWS), so the board always fills it.
+    // A small terminal-sized window. The embedded terminal lays out the
+    // dashboard to whatever cols/rows fit; resizing forwards SIGWINCH to the
+    // child so it re-flows, exactly like a real terminal.
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([530.0, 432.0])
-            .with_min_inner_size([530.0, 432.0])
+            .with_inner_size([820.0, 520.0])
+            .with_min_inner_size([560.0, 360.0])
             .with_title("RatioUp"),
         ..Default::default()
     };
     let _ = eframe::run_native(
         "RatioUp",
         options,
-        Box::new(|cc| Ok(Box::new(app::RatioUpApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(term_app::TermApp::new(cc)))),
     );
 }
