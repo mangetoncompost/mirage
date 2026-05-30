@@ -25,16 +25,19 @@ use std::io::{Write, stdout};
 /// streams raw bytes the key thread reads as commands (a pasted 'q' would quit,
 /// 'x' would remove a torrent) — disabling it makes a paste a no-op.
 ///
-/// We Clear(All)+home AFTER entering the alt screen: `EnterAlternateScreen`
-/// preserves the cursor's row, so without this the first frame paints wherever
-/// the cursor sat (mid-screen, pushing the box down) and leaves scrollable
-/// residue. Clearing pins the dashboard to a blank, unscrollable buffer.
+/// We clear AFTER entering the alt screen. `EnterAlternateScreen` preserves the
+/// cursor's row, so without `Clear(All)`+home the first frame paints wherever the
+/// cursor sat (mid-screen, pushing the box down). And macOS Terminal.app keeps
+/// the *main* screen's scrollback reachable even inside the alt screen, so we
+/// also `Clear(Purge)` (ESC[3J) to wipe that scrollback — otherwise you can
+/// scroll up and see the shell/clear output behind the dashboard.
 fn enter_screen() {
     let mut o = stdout();
     let _ = enable_raw_mode();
     let _ = execute!(
         o,
         EnterAlternateScreen,
+        Clear(ClearType::Purge),
         Clear(ClearType::All),
         MoveTo(0, 0),
         Hide,
