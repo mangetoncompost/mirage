@@ -997,7 +997,11 @@ fn render_torrent_row(tv: &crate::ui::snapshot::TorrentView, c: &Caps, inner: us
         return (txt, vis.min(body_w));
     }
 
-    let name = truncate(&tv.name, name_w, c.utf8);
+    // The name column total width is `name_w`, and the field starts with a
+    // 1-cell dot + 1 space, so the name itself gets `name_w - 2` cells. (Earlier
+    // this truncated to `name_w`, making truncated names 2 cells too wide and
+    // shoving the S/L/… columns left of the header for short, untruncated names.)
+    let name = truncate(&tv.name, name_w.saturating_sub(2), c.utf8);
     let dot = if tv.error_count > 0 {
         format!("{}●{}", c_err(c), c.reset())
     } else if tv.downloading {
