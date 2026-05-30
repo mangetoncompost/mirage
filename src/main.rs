@@ -10,7 +10,7 @@ use tokio::time::Duration;
 use tracing::{self, error, info, warn};
 use utils::format_bytes;
 
-use crate::announcer::scheduler::run as run_announcer;
+pub(crate) use crate::announcer::scheduler::run as run_announcer;
 use crate::config::Config;
 use crate::torrent::Torrent;
 
@@ -19,6 +19,8 @@ pub mod bencode;
 mod config;
 mod control;
 mod directory;
+mod engine;
+mod gui;
 pub mod json_output;
 mod state;
 pub mod torrent;
@@ -47,7 +49,7 @@ async fn run_key_renewer(refresh_every: u16) {
 }
 
 /// Parse CLI args. Only a config file can be there.
-fn parse_cli_args() -> Option<PathBuf> {
+pub(crate) fn parse_cli_args() -> Option<PathBuf> {
     let mut args = std::env::args().skip(1); // Skip the program name
 
     // Manually parse arguments
@@ -60,6 +62,8 @@ fn parse_cli_args() -> Option<PathBuf> {
                     tracing::error!("Missing value for -c/--config");
                 }
             }
+            // GUI flag is handled in main(); ignore it here silently.
+            "--gui" => {}
             // Handle other arguments or positional arguments here
             other_arg => {
                 tracing::error!("Warning: Unknown argument: {}, Ignoring", other_arg);
@@ -69,7 +73,7 @@ fn parse_cli_args() -> Option<PathBuf> {
     None
 }
 
-fn get_config_from_xdg() -> Option<PathBuf> {
+pub(crate) fn get_config_from_xdg() -> Option<PathBuf> {
     let xdg = xdg::BaseDirectories::with_prefix("RatioUp");
     match xdg.place_config_file("config.toml") {
         Ok(path) => return Some(path),
@@ -78,8 +82,27 @@ fn get_config_from_xdg() -> Option<PathBuf> {
     None
 }
 
+/// Entry point: a native macOS GUI window when launched with `--gui` or from the
+/// .app bundle; otherwise the original CLI/TTY behavior, byte-for-byte.
+fn main() {
+    let want_gui = std::env::args().any(|a| a == "--gui") || launched_from_bundle();
+    if want_gui {
+        gui::run();
+    } else {
+        run_cli();
+    }
+}
+
+/// True when the executable lives inside an .app bundle (…/Contents/MacOS/).
+fn launched_from_bundle() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.ends_with("Contents/MacOS")))
+        .unwrap_or(false)
+}
+
 #[tokio::main]
-async fn main() {
+async fn run_cli() {
     //configure logger
     let log_level = std::env::var("RUST_LOG")
         .unwrap_or_else(|_| "trace".to_string());
