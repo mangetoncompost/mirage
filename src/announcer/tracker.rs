@@ -5,9 +5,21 @@ use crate::torrent::Torrent;
 use crate::ui::{EventKind, emit};
 use crate::{CLIENT, CONFIG, TORRENTS};
 use fake_torrent_client::Client;
+use once_cell::sync::Lazy;
 use reqwest::Client as ReqwestClient;
 use tracing::{debug, error, info, trace, warn};
 use url::{Host, Url};
+
+/// Shared HTTP client — built once at first use and reused across all announces.
+/// The User-Agent is NOT baked in here; it is injected per-request via the headers
+/// returned by `client.get_query()`, so changing the emulated client profile with `k`
+/// is reflected immediately without needing to rebuild the pool.
+static HTTP_CLIENT: Lazy<ReqwestClient> = Lazy::new(|| {
+    ReqwestClient::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .expect("Failed to build reqwest client")
+});
 
 /// Sane bounds for a tracker-supplied announce interval (seconds). The value is
 /// a fully untrusted i64 from the tracker response: a negative number would cast
@@ -397,12 +409,6 @@ async fn announce_http(
     //     peer_id = percent_encoding::percent_encode(&params.peer_id, URL_ENCODE_RESERVED),
     // );
 
-    let reqwest_client = ReqwestClient::builder()
-        .user_agent(&client.user_agent)
-        .timeout(Duration::from_secs(60)) // Timeout pour la connexion et la lecture
-        .build()
-        .expect("Failed to build reqwest client");
-
     // headers_to_set carries the client's User-Agent/Accept/Accept-Encoding.
     // (The query template is built inside build_url, not from here.)
     let (_url_template, headers_to_set) = client.get_query();
@@ -413,7 +419,7 @@ async fn announce_http(
         build_url(url, torrent, client, event, key_hex, pre_loop_uploaded).await;
     info!("Announce HTTP URL {built_url}");
 
-    let mut request_builder = reqwest_client.get(&built_url);
+    let mut request_builder = HTTP_CLIENT.get(&built_url);
 
     for (name, value) in headers_to_set {
         request_builder = request_builder.header(&name, &value);
