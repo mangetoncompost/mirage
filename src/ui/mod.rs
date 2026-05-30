@@ -72,7 +72,9 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
         let feed_lines = render::feed_capacity(h, rows.len(), 12);
         let frame = Frame {
             client: snapshot_client().await,
-            started: *crate::STARTED.get().expect("STARTED set in main before UI spawn"),
+            started: *crate::STARTED
+                .get()
+                .expect("STARTED set in main before UI spawn"),
             now: chrono::Utc::now(),
             rows,
             feed: events::snapshot(feed_lines),
@@ -137,7 +139,9 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
 /// unknown and fall back to `$COLUMNS`/`$LINES`, then to 80×24.
 fn term_size() -> (u16, u16) {
     let env_dim = |name: &str| -> Option<u16> {
-        std::env::var(name).ok().and_then(|v| v.trim().parse::<u16>().ok())
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.trim().parse::<u16>().ok())
     };
     let (mut w, mut h) = crossterm::terminal::size().unwrap_or((0, 0));
     // Only substitute a fallback when crossterm returned the (0,0) sentinel (unknown

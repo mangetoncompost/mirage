@@ -117,7 +117,14 @@ async fn handle_file_added(path: PathBuf) {
         Ok(t) => t,
         Err(e) => {
             error!("Cannot parse torrent {}: {e}", path.display());
-            emit(UiEventKind::Error, &path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), format!("parse error: {e}"));
+            emit(
+                UiEventKind::Error,
+                &path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                format!("parse error: {e}"),
+            );
             return;
         }
     };
@@ -131,7 +138,11 @@ async fn handle_file_added(path: PathBuf) {
             "Skipping torrent {} because there is no URL (DHT or not supported URLs)",
             path.display()
         );
-        emit(UiEventKind::Error, &torrent.name, "skipped: no supported tracker URL");
+        emit(
+            UiEventKind::Error,
+            &torrent.name,
+            "skipped: no supported tracker URL",
+        );
         return;
     }
 
@@ -154,7 +165,10 @@ async fn handle_file_added(path: PathBuf) {
             emit(UiEventKind::Added, &name, "duplicate, ignored");
             return;
         }
-        TORRENTS.write().await.push(std::sync::Arc::new(Mutex::new(torrent)));
+        TORRENTS
+            .write()
+            .await
+            .push(std::sync::Arc::new(Mutex::new(torrent)));
     }
 
     // Announce with STARTED event

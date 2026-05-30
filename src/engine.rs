@@ -15,7 +15,9 @@ use crate::{CONFIG, announcer};
 /// locks it needs, briefly, and never holds one across a network await beyond
 /// what `announce` already does. Used by both the GUI `start()` and the CLI/TTY
 /// `run_cli()` (the dashboard's per-torrent keys send these commands).
-pub(crate) async fn process_commands(mut rx: tokio::sync::mpsc::UnboundedReceiver<crate::control::Cmd>) {
+pub(crate) async fn process_commands(
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<crate::control::Cmd>,
+) {
     use crate::control::Cmd;
     while let Some(cmd) = rx.recv().await {
         match cmd {
@@ -101,28 +103,59 @@ async fn save_config_toml() {
     let mut tbl = toml::Table::new();
     tbl.insert("client".into(), toml::Value::String(c.client.clone()));
     tbl.insert("port".into(), toml::Value::Integer(c.port as i64));
-    tbl.insert("min_upload_rate".into(), toml::Value::Integer(c.min_upload_rate as i64));
-    tbl.insert("max_upload_rate".into(), toml::Value::Integer(c.max_upload_rate as i64));
-    tbl.insert("min_download_rate".into(), toml::Value::Integer(c.min_download_rate as i64));
-    tbl.insert("max_download_rate".into(), toml::Value::Integer(c.max_download_rate as i64));
-    tbl.insert("numwant".into(), toml::Value::Integer(c.numwant.unwrap_or(80) as i64));
+    tbl.insert(
+        "min_upload_rate".into(),
+        toml::Value::Integer(c.min_upload_rate as i64),
+    );
+    tbl.insert(
+        "max_upload_rate".into(),
+        toml::Value::Integer(c.max_upload_rate as i64),
+    );
+    tbl.insert(
+        "min_download_rate".into(),
+        toml::Value::Integer(c.min_download_rate as i64),
+    );
+    tbl.insert(
+        "max_download_rate".into(),
+        toml::Value::Integer(c.max_download_rate as i64),
+    );
+    tbl.insert(
+        "numwant".into(),
+        toml::Value::Integer(c.numwant.unwrap_or(80) as i64),
+    );
     tbl.insert("use_pid_file".into(), toml::Value::Boolean(c.use_pid_file));
-    tbl.insert("torrent_dir".into(), toml::Value::String(c.torrent_dir.display().to_string()));
+    tbl.insert(
+        "torrent_dir".into(),
+        toml::Value::String(c.torrent_dir.display().to_string()),
+    );
     if let Some(ref p) = c.output_stats {
-        tbl.insert("output_stats".into(), toml::Value::String(p.display().to_string()));
+        tbl.insert(
+            "output_stats".into(),
+            toml::Value::String(p.display().to_string()),
+        );
     }
     let toml_str = toml::to_string(&tbl).unwrap_or_else(|e| {
         tracing::warn!("SaveConfig: serialize failed: {e}");
         String::new()
     });
-    if toml_str.is_empty() { return; }
+    if toml_str.is_empty() {
+        return;
+    }
     if let Some(path) = crate::get_config_from_xdg() {
         if let Err(e) = tokio::fs::write(&path, toml_str).await {
             tracing::warn!("SaveConfig: {e}");
-            crate::ui::emit(crate::ui::EventKind::Error, "config", format!("save failed: {e}"));
+            crate::ui::emit(
+                crate::ui::EventKind::Error,
+                "config",
+                format!("save failed: {e}"),
+            );
         } else {
             info!("config saved to {}", path.display());
-            crate::ui::emit(crate::ui::EventKind::ConnectOk, "config", format!("saved to {}", path.display()));
+            crate::ui::emit(
+                crate::ui::EventKind::ConnectOk,
+                "config",
+                format!("saved to {}", path.display()),
+            );
         }
     }
 }

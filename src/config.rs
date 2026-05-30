@@ -46,8 +46,8 @@ impl Default for Config {
             // The port number that the client is listening on. Ports reserved for BitTorrent are typically 6881-6889. Clients may choose to give up if it cannot establish
             // a port within this range. Here ports are random between 49152 and 65534
             port: fastrand::u16(49152..65534),
-            min_upload_rate: 8192,    //8*1024
-            max_upload_rate: 2097152, //2048*1024
+            min_upload_rate: 8192,         //8*1024
+            max_upload_rate: 2097152,      //2048*1024
             min_download_rate: 8192,       // == .env MIN_DOWNLOAD_RATE hint
             max_download_rate: 16_777_216, // == .env MAX_DOWNLOAD_RATE hint (16 MiB/s)
             // check_https_certs: false,
@@ -139,25 +139,41 @@ impl Config {
                 };
                 if let Some(speed) = root_table.get("min_upload_rate") {
                     match speed.as_integer() {
-                        Some(v) => { if let Some(r) = parse_rate("min_upload_rate", v) { config.min_upload_rate = r; } }
+                        Some(v) => {
+                            if let Some(r) = parse_rate("min_upload_rate", v) {
+                                config.min_upload_rate = r;
+                            }
+                        }
                         None => error!("min_upload_rate is not an integer"),
                     }
                 }
                 if let Some(speed) = root_table.get("max_upload_rate") {
                     match speed.as_integer() {
-                        Some(v) => { if let Some(r) = parse_rate("max_upload_rate", v) { config.max_upload_rate = r; } }
+                        Some(v) => {
+                            if let Some(r) = parse_rate("max_upload_rate", v) {
+                                config.max_upload_rate = r;
+                            }
+                        }
                         None => error!("max_upload_rate is not an integer"),
                     }
                 }
                 if let Some(speed) = root_table.get("min_download_rate") {
                     match speed.as_integer() {
-                        Some(v) => { if let Some(r) = parse_rate("min_download_rate", v) { config.min_download_rate = r; } }
+                        Some(v) => {
+                            if let Some(r) = parse_rate("min_download_rate", v) {
+                                config.min_download_rate = r;
+                            }
+                        }
                         None => error!("min_download_rate is not an integer"),
                     }
                 }
                 if let Some(speed) = root_table.get("max_download_rate") {
                     match speed.as_integer() {
-                        Some(v) => { if let Some(r) = parse_rate("max_download_rate", v) { config.max_download_rate = r; } }
+                        Some(v) => {
+                            if let Some(r) = parse_rate("max_download_rate", v) {
+                                config.max_download_rate = r;
+                            }
+                        }
                         None => error!("max_download_rate is not an integer"),
                     }
                 }

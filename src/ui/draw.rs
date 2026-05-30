@@ -76,12 +76,18 @@ pub fn restore() {
     // Disable raw mode FIRST; idempotent and safe even if it was never enabled
     // (non-TTY restore() calls, double-calls from Drop + explicit path + panic).
     let _ = disable_raw_mode();
-    let _ = execute!(o, EnableBracketedPaste, ResetColor, Show, LeaveAlternateScreen);
+    let _ = execute!(
+        o,
+        EnableBracketedPaste,
+        ResetColor,
+        Show,
+        LeaveAlternateScreen
+    );
     let _ = o.flush();
 }
 
-/// One buffered write per frame. `frame` already contains per-line clear-to-EOL
-/// + line breaks and a trailing clear-below; we only home the cursor, write the
+/// One buffered write per frame. `frame` already contains per-line clear-to-EOL,
+/// line breaks, and a trailing clear-below; we only home the cursor, write the
 /// whole string, and flush — a single syscall's worth of I/O.
 pub fn paint(frame: &str) {
     let mut o = stdout();
