@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux:
+    name: Linux x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install musl tools
+        run: sudo apt-get install -y musl-tools
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build static binary
+        run: cargo build --release --locked --target x86_64-unknown-linux-musl
+
+      - name: Rename binary
+        run: cp target/x86_64-unknown-linux-musl/release/mirage mirage-linux-x86_64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mirage-linux-x86_64
+          path: mirage-linux-x86_64
+
+  build-macos:
+    name: macOS ${{ matrix.target }}
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            suffix: macos-aarch64
+          - target: x86_64-apple-darwin
+            suffix: macos-x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Rename binary
+        run: cp target/${{ matrix.target }}/release/mirage mirage-${{ matrix.suffix }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mirage-${{ matrix.suffix }}
+          path: mirage-${{ matrix.suffix }}
+
+  build-macos-app:
+    name: macOS .app bundle
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --locked --target aarch64-apple-darwin
+
+      - name: Copy binary to expected path
+        run: |
+          mkdir -p target/release
+          cp target/aarch64-apple-darwin/release/mirage target/release/mirage
+
+      - name: Build .app bundle
+        run: bash scripts/make_app.sh
+
+      - name: Zip .app
+        run: zip -r Mirage.app.zip Mirage.app
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mirage.app.zip
+          path: Mirage.app.zip
+
+  release:
+    name: Publish Release
+    needs: [build-linux, build-macos, build-macos-app]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            mirage-linux-x86_64
+            mirage-macos-aarch64
+            mirage-macos-x86_64
+            Mirage.app.zip
