@@ -101,7 +101,11 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
             .sum();
         let celebrate = overlay::check_milestone(total_up, total_seeding_len, spinner as u64);
         if celebrate {
-            crate::ui::emit(crate::ui::EventKind::Milestone, "session", overlay::celebration_label());
+            crate::ui::emit(
+                crate::ui::EventKind::Milestone,
+                "session",
+                overlay::celebration_label(),
+            );
         }
         let celebrate_label = overlay::celebration_label();
 

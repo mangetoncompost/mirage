@@ -8,10 +8,10 @@
 //! Overlay state (Help, Palette, Detail) has been moved to [`super::overlay`]
 //! so it can be reused independently of the tab index.
 
+use once_cell::sync::Lazy;
 use std::collections::HashSet;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use once_cell::sync::Lazy;
 
 /// Which of the ten tabs is active. Keep in sync with `TAB_LABELS` in
 /// `render.rs`.
@@ -149,7 +149,10 @@ pub fn is_marked(hash: &[u8; 20]) -> bool {
 /// the marked set is empty. The key handler uses this for f/x batch actions.
 pub fn marked_or_selected() -> Vec<[u8; 20]> {
     let g = MARKED.lock().ok();
-    let marks: Vec<_> = g.as_ref().map(|s| s.iter().copied().collect()).unwrap_or_default();
+    let marks: Vec<_> = g
+        .as_ref()
+        .map(|s| s.iter().copied().collect())
+        .unwrap_or_default();
     if marks.is_empty() {
         selected_hash().into_iter().collect()
     } else {

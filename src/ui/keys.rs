@@ -62,7 +62,8 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                             overlay::palette_bump_sel(1, crate::ui::render::palette_match_count());
                         }
                         (KeyCode::Enter, _) => {
-                            let sel = overlay::PALETTE_SEL.load(std::sync::atomic::Ordering::Relaxed);
+                            let sel =
+                                overlay::PALETTE_SEL.load(std::sync::atomic::Ordering::Relaxed);
                             crate::ui::render::execute_palette_item(sel, view::selected_hash());
                             overlay::close_palette();
                         }

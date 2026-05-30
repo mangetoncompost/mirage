@@ -11,7 +11,7 @@
 //! - `Palette` — the fuzzy command palette (F3.1; INFRA-C wires its keys)
 //! - `Detail`  — per-torrent info + wire sub-view (F3.2)
 
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
 /// Which overlay (if any) is currently open. Resolved in `render_once`, passed
 /// to `build_frame` as a `Overlay` value — never read inside `build_frame`.
@@ -86,8 +86,7 @@ pub fn close_palette() {
 /// The user's in-progress search query inside the palette overlay.
 pub static PALETTE_BUF: Mutex<String> = Mutex::new(String::new());
 /// Selected item index within the filtered palette list.
-pub static PALETTE_SEL: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
+pub static PALETTE_SEL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Type a character into the palette buffer.
 pub fn palette_push(ch: char) {
@@ -190,5 +189,8 @@ pub fn celebrating(tick: u64) -> bool {
 
 /// The celebration label (e.g. "ratio 2.0× !").
 pub fn celebration_label() -> String {
-    CELEBRATE_LABEL.lock().map(|g| g.clone()).unwrap_or_default()
+    CELEBRATE_LABEL
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default()
 }

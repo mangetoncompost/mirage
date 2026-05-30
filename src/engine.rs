@@ -232,9 +232,17 @@ async fn export_snapshot() {
     if written {
         let b64 = crate::utils::base64_encode(filename.as_bytes());
         crate::ui::draw::queue_clipboard(b64);
-        crate::ui::emit(crate::ui::EventKind::Exported, "export", format!("→ {filename}"));
+        crate::ui::emit(
+            crate::ui::EventKind::Exported,
+            "export",
+            format!("→ {filename}"),
+        );
         info!("snapshot exported to {filename}");
     } else {
-        crate::ui::emit(crate::ui::EventKind::Error, "export", "write failed — check logs");
+        crate::ui::emit(
+            crate::ui::EventKind::Error,
+            "export",
+            "write failed — check logs",
+        );
     }
 }

@@ -25,7 +25,7 @@ pub enum EventKind {
     Error,        // tracker failure_reason / bad response / transport error
     Exported,     // session snapshot written to a JSON file (F2.3)
     #[allow(dead_code)]
-    GoalReached,  // per-torrent upload target hit; upload auto-capped (F2.2)
+    GoalReached, // per-torrent upload target hit; upload auto-capped (F2.2)
     Milestone,    // a ratio milestone was crossed (F1.3 celebration)
 }
 
