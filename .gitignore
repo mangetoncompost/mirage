@@ -1,6 +1,7 @@
 target/
 *.torrent
 /torrents/*.torrent
+.env
 .env.local
 .claude/
 CLAUDE.md
