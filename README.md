@@ -54,8 +54,6 @@ than re-downloading from scratch, which would itself be detectable.
 
 ### Upload speed curve
 
-![Upload speed curve](assets/speed-curve.svg)
-
 Upload speed is modelled as a sum of four sinusoidal components:
 
 - A slow mean-drift oscillation (period ~1200 s)
