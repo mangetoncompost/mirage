@@ -26,7 +26,11 @@ const TERM_FONT_NAME: &str = "ratioup-mono";
 const TERM_FONT_BYTES: &[u8] =
     include_bytes!("../../assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf");
 
-const FONT_SIZE: f32 = 14.0;
+/// Small, dense cell size — reads like a real terminal (most run ~11px). On a
+/// 2× Retina display this lands on whole device pixels, so box-drawing stays
+/// crisp. With the window ~860px wide this gives ~120 columns, plenty for the
+/// 96-col board to breathe.
+const FONT_SIZE: f32 = 11.0;
 
 /// Register the bundled font as the egui Monospace family (egui_term draws with
 /// `FontId::monospace`, so this is what the terminal will use).
