@@ -65,6 +65,11 @@ pub async fn watch_directory(directory: PathBuf) {
                         let fs_event = match event.kind {
                             EventKind::Create(_) => Some(FsEvent::Added(path)),
                             EventKind::Remove(_) => Some(FsEvent::Removed(path)),
+                            // Atomic rename (rsync / transmission temp-file+rename) fires
+                            // Modify(Name(To)) on Linux/macOS — treat as an add.
+                            EventKind::Modify(notify::event::ModifyKind::Name(
+                                notify::event::RenameMode::To,
+                            )) => Some(FsEvent::Added(path)),
                             _ => None,
                         };
 
@@ -112,6 +117,7 @@ async fn handle_file_added(path: PathBuf) {
         Ok(t) => t,
         Err(e) => {
             error!("Cannot parse torrent {}: {e}", path.display());
+            emit(UiEventKind::Error, &path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), format!("parse error: {e}"));
             return;
         }
     };
@@ -125,27 +131,30 @@ async fn handle_file_added(path: PathBuf) {
             "Skipping torrent {} because there is no URL (DHT or not supported URLs)",
             path.display()
         );
+        emit(UiEventKind::Error, &torrent.name, "skipped: no supported tracker URL");
         return;
     }
 
     let name = torrent.name.clone();
     let info_hash = torrent.info_hash_urlencoded.clone();
 
-    // Dedup-check and insert atomically under ONE write lock. Doing the check
-    // under a read lock and the push under a separate write lock (with locks
-    // dropped between) let two rapid Create events for the same file (editors /
-    // rsync emit several) both pass the check and double-insert — which would
-    // declare 2× upload for one info-hash and read as cheating to the tracker.
+    // Dedup-check: snapshot existing hashes under a short read lock (no inner
+    // m.lock() while holding the outer read), then push under a write lock.
+    // This keeps the outer write lock duration minimal and never blocks a
+    // mid-announce torrent's inner mutex while holding TORRENTS.write().
     {
-        let mut list = TORRENTS.write().await;
-        for m in list.iter() {
-            let t = m.lock().await;
-            if t.info_hash_urlencoded == info_hash {
-                warn!("Torrent with same hash already exists: {name}");
-                return;
-            }
+        let existing: Vec<String> = {
+            let list = TORRENTS.read().await;
+            list.iter()
+                .filter_map(|m| m.try_lock().ok().map(|t| t.info_hash_urlencoded.clone()))
+                .collect()
+        };
+        if existing.iter().any(|h| h == &info_hash) {
+            warn!("Torrent with same hash already exists: {name}");
+            emit(UiEventKind::Added, &name, "duplicate, ignored");
+            return;
         }
-        list.push(std::sync::Arc::new(Mutex::new(torrent)));
+        TORRENTS.write().await.push(std::sync::Arc::new(Mutex::new(torrent)));
     }
 
     // Announce with STARTED event
@@ -223,15 +232,16 @@ async fn handle_file_removed(path: PathBuf) {
             }
         }
 
-        // Remove from list
+        // Remove from list. Use try_lock to read the hash; if try_lock fails the
+        // torrent is still mid-announce — we already sent STOPPED above, so it
+        // is safe to drop it now (retain returns false → removes it).
         {
             let mut list = TORRENTS.write().await;
             list.retain(|m| {
-                // We need to check without async, so we use try_lock
                 if let Ok(t) = m.try_lock() {
                     t.info_hash_urlencoded != hash
                 } else {
-                    true // Keep if we can't lock (shouldn't happen)
+                    false // mid-announce: STOPPED was already sent, drop it
                 }
             });
         }

@@ -35,14 +35,21 @@ pub(crate) async fn process_commands(mut rx: tokio::sync::mpsc::UnboundedReceive
                 announce_then_remove(hash).await;
             }
             Cmd::ForceAnnounce(hash) => {
-                let list = crate::TORRENTS.read().await;
-                for m in list.iter() {
+                // Clone handles under a short read lock, then lock the inner
+                // mutex off the outer lock (mirrors scheduler.rs pattern).
+                let handles: Vec<_> = crate::TORRENTS.read().await.clone();
+                for m in handles.iter() {
                     let mut t = m.lock().await;
                     if t.info_hash == hash {
-                        // Make it due now so the scheduler announces on the next wake.
+                        // For downloading torrents the scheduler gates on
+                        // last_announce.elapsed() >= dl_interval (~45 s). Setting
+                        // last_announce far enough back forces that gate to open.
+                        let dl_interval_secs = 50u64;
+                        t.last_announce = std::time::Instant::now()
+                            - std::time::Duration::from_secs(dl_interval_secs);
+                        // For seeding torrents interval==0 + old last_announce makes
+                        // should_announce() immediately true.
                         t.interval = 0;
-                        t.last_announce =
-                            std::time::Instant::now() - std::time::Duration::from_secs(1);
                         info!("ForceAnnounce: {}", t.name);
                         break;
                     }
@@ -65,14 +72,14 @@ pub(crate) async fn process_commands(mut rx: tokio::sync::mpsc::UnboundedReceive
 
 /// Announce STOPPED for the torrent then drop it from the list.
 async fn announce_then_remove(hash: [u8; 20]) {
-    {
-        let list = crate::TORRENTS.read().await;
-        for m in list.iter() {
-            let mut t = m.lock().await;
-            if t.info_hash == hash {
-                announcer::tracker::announce(&mut t, Some(announcer::tracker::Event::Stopped)).await;
-                break;
-            }
+    // Clone handles under a short read lock so we don't hold TORRENTS.read()
+    // across the multi-second network announce (mirrors scheduler.rs pattern).
+    let handles: Vec<_> = crate::TORRENTS.read().await.clone();
+    for m in handles.iter() {
+        let mut t = m.lock().await;
+        if t.info_hash == hash {
+            announcer::tracker::announce(&mut t, Some(announcer::tracker::Event::Stopped)).await;
+            break;
         }
     }
     let mut list = crate::TORRENTS.write().await;
@@ -80,32 +87,42 @@ async fn announce_then_remove(hash: [u8; 20]) {
         if let Ok(t) = m.try_lock() {
             t.info_hash != hash
         } else {
-            true
+            false // STOPPED already sent above; safe to drop even if mid-announce
         }
     });
     info!("torrent removed");
 }
 
-/// Serialize the live CONFIG to the XDG config.toml.
+/// Serialize the live CONFIG to the XDG config.toml using toml::to_string so
+/// that client names and paths with quotes/backslashes/newlines are correctly
+/// escaped and the file always round-trips without corrupting on the next load.
 async fn save_config_toml() {
     let c = CONFIG.load();
-    let toml = format!(
-        "client = \"{}\"\nport = {}\nmin_upload_rate = {}\nmax_upload_rate = {}\nmin_download_rate = {}\nmax_download_rate = {}\nnumwant = {}\nuse_pid_file = {}\ntorrent_dir = \"{}\"\n",
-        c.client,
-        c.port,
-        c.min_upload_rate,
-        c.max_upload_rate,
-        c.min_download_rate,
-        c.max_download_rate,
-        c.numwant.unwrap_or(80),
-        c.use_pid_file,
-        c.torrent_dir.display(),
-    );
+    let mut tbl = toml::Table::new();
+    tbl.insert("client".into(), toml::Value::String(c.client.clone()));
+    tbl.insert("port".into(), toml::Value::Integer(c.port as i64));
+    tbl.insert("min_upload_rate".into(), toml::Value::Integer(c.min_upload_rate as i64));
+    tbl.insert("max_upload_rate".into(), toml::Value::Integer(c.max_upload_rate as i64));
+    tbl.insert("min_download_rate".into(), toml::Value::Integer(c.min_download_rate as i64));
+    tbl.insert("max_download_rate".into(), toml::Value::Integer(c.max_download_rate as i64));
+    tbl.insert("numwant".into(), toml::Value::Integer(c.numwant.unwrap_or(80) as i64));
+    tbl.insert("use_pid_file".into(), toml::Value::Boolean(c.use_pid_file));
+    tbl.insert("torrent_dir".into(), toml::Value::String(c.torrent_dir.display().to_string()));
+    if let Some(ref p) = c.output_stats {
+        tbl.insert("output_stats".into(), toml::Value::String(p.display().to_string()));
+    }
+    let toml_str = toml::to_string(&tbl).unwrap_or_else(|e| {
+        tracing::warn!("SaveConfig: serialize failed: {e}");
+        String::new()
+    });
+    if toml_str.is_empty() { return; }
     if let Some(path) = crate::get_config_from_xdg() {
-        if let Err(e) = tokio::fs::write(&path, toml).await {
+        if let Err(e) = tokio::fs::write(&path, toml_str).await {
             tracing::warn!("SaveConfig: {e}");
+            crate::ui::emit(crate::ui::EventKind::Error, "config", format!("save failed: {e}"));
         } else {
             info!("config saved to {}", path.display());
+            crate::ui::emit(crate::ui::EventKind::ConnectOk, "config", format!("saved to {}", path.display()));
         }
     }
 }

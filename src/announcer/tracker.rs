@@ -276,14 +276,26 @@ pub async fn announce(torrent: &mut Torrent, event: Option<Event>) {
         // otherwise wipe a valid leecher count from the 1st (→ no upload). We
         // keep the max seen across all trackers (a peer counted by any tracker
         // is real), then write it back once the loop is done.
+        // Snapshot the upload window ONCE before the per-URL loop. After the first
+        // successful announce resets torrent.last_announce, subsequent trackers
+        // would see elapsed≈0 and declare uploaded=0. We pass the pre-computed
+        // value into each announce call so every tracker gets the same honest delta.
+        let pre_loop_uploaded: u64 =
+            if matches!(event, Some(Event::Started) | Some(Event::Completed)) {
+                0
+            } else {
+                let t1 = torrent.origin.elapsed().as_secs_f64();
+                let t0 = (t1 - torrent.last_announce.elapsed().as_secs_f64()).max(0.0);
+                torrent.integrate(t0, t1).round().max(0.0) as u64
+            };
         let mut max_seeders: u16 = 0;
         let mut max_leechers: u16 = 0;
         for url in torrent.urls.clone() {
             debug!("\t{}", url);
             if url.to_lowercase().starts_with("udp://") {
-                crate::announcer::udp::announce_udp(&url, torrent, client, event).await;
+                crate::announcer::udp::announce_udp(&url, torrent, client, event, pre_loop_uploaded).await;
             } else {
-                announce_http(&url, torrent, client, event).await;
+                announce_http(&url, torrent, client, event, pre_loop_uploaded).await;
             }
             max_seeders = max_seeders.max(torrent.seeders);
             max_leechers = max_leechers.max(torrent.leechers);
@@ -320,6 +332,7 @@ async fn announce_http(
     torrent: &mut Torrent,
     client: &Client,
     event: Option<Event>,
+    pre_loop_uploaded: u64,
 ) -> u64 {
     // announce parameters are built up in the query string, see:
     // https://www.bittorrent.org/beps/bep_0003.html trackers section
@@ -382,7 +395,7 @@ async fn announce_http(
     // Inject the key as 8 uppercase hex (constant per session), like a real
     // Transmission — not the decimal `client.key.to_string()` used before.
     let key_hex = crate::config::KEY_HEX.load().as_str().to_string();
-    let (built_url, uploaded) = build_url(url, torrent, client, event, key_hex).await;
+    let (built_url, uploaded) = build_url(url, torrent, client, event, key_hex, pre_loop_uploaded).await;
     info!("Announce HTTP URL {built_url}");
 
     let mut request_builder = reqwest_client.get(&built_url);
@@ -556,6 +569,12 @@ async fn announce_http(
             torrent.error_count = torrent.error_count.saturating_add(1);
         }
     }
+    // On error (or a tracker that returned no interval) torrent.interval stays 0,
+    // which would make the scheduler retry at the 5 s floor every loop. Apply a
+    // conservative backoff so a failing tracker is retried at most every ~60 s.
+    if torrent.interval == 0 && torrent.error_count > 0 {
+        torrent.interval = 60;
+    }
     if let Some(min) = torrent.min_interval
         && min > torrent.interval
     {
@@ -574,23 +593,15 @@ pub async fn build_url(
     client: &Client,
     event: Option<Event>,
     key: String,
+    // Pre-computed upload delta for this announce round (snapshotted by the
+    // caller before the per-URL loop so every tracker gets the same window).
+    uploaded: u64,
 ) -> (String, u64) {
     info!("Torrent {:?}: {}", event, torrent.name);
-    // Declared upload = exact integral of the time-varying speed curve over the
-    // window since the last announce (the area under the curve the dashboard has
-    // been showing). STARTED declares 0, like a real client. The window is
-    // derived from last_announce, so it is idempotent across the per-URL loop
-    // (re-integrates the same [t0,t1] until last_announce resets on success).
-    // STARTED and COMPLETED declare 0 upload (a client that just started or just
-    // finished downloading hasn't seeded yet). Belt-and-suspenders with the
-    // can_upload() gate (which is false while Downloading anyway).
-    let uploaded: u64 = if matches!(event, Some(Event::Started) | Some(Event::Completed)) {
-        0
-    } else {
-        let t1 = torrent.origin.elapsed().as_secs_f64();
-        let t0 = (t1 - torrent.last_announce.elapsed().as_secs_f64()).max(0.0);
-        torrent.integrate(t0, t1).round().max(0.0) as u64
-    };
+    // `uploaded` is the pre-computed delta passed in by announce() before the
+    // per-URL loop — see the comment there. This function no longer recomputes
+    // it from last_announce so that every tracker in the list receives the
+    // same declared window.
 
     // The caller (announce → announce_http) already holds the CLIENT read guard
     // and passes the borrow down. We must NOT re-acquire CLIENT.read() here: the

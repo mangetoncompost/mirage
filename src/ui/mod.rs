@@ -59,8 +59,15 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
         // selection to the live count so a shrunk torrent list never leaves the
         // cursor past the end.
         view::set_rows(rows.iter().map(|r| r.info_hash).collect());
-        view::clamp_sel(rows.len());
         let active = view::active_view();
+        // Clamp the selection only for list views (Dashboard/Torrents/Trackers); on
+        // the Speeds tab SEL is a settings-row index (0..=5) unrelated to torrent count.
+        use view::View;
+        match active {
+            View::Dashboard | View::Torrents | View::Trackers => view::clamp_sel(rows.len()),
+            View::Speeds => view::clamp_sel(6),
+            _ => {}
+        }
         let sel = view::sel();
         let feed_lines = render::feed_capacity(h, rows.len(), 12);
         let frame = Frame {
@@ -94,21 +101,31 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
     loop {
         #[cfg(unix)]
         tokio::select! {
+            // biased: shutdown always wins over a ready tick so we never paint
+            // onto the restored normal screen after the coordinator calls restore().
+            biased;
+            _ = shutdown.changed() => break,
             _ = tick.tick() => {
                 render_once(spinner).await;
                 spinner = spinner.wrapping_add(1);
             }
             _ = sigwinch.recv() => { render_once(spinner).await; }
-            _ = sigcont.recv() => { draw::reenter(); render_once(spinner).await; }
-            _ = shutdown.changed() => break,
+            _ = sigcont.recv() => {
+                // Guard: don't re-enter the alt screen after shutdown was signalled.
+                if !*shutdown.borrow() {
+                    draw::reenter();
+                    render_once(spinner).await;
+                }
+            }
         }
         #[cfg(not(unix))]
         tokio::select! {
+            biased;
+            _ = shutdown.changed() => break,
             _ = tick.tick() => {
                 render_once(spinner).await;
                 spinner = spinner.wrapping_add(1);
             }
-            _ = shutdown.changed() => break,
         }
     }
     draw::restore();
@@ -123,10 +140,14 @@ fn term_size() -> (u16, u16) {
         std::env::var(name).ok().and_then(|v| v.trim().parse::<u16>().ok())
     };
     let (mut w, mut h) = crossterm::terminal::size().unwrap_or((0, 0));
-    if w < 40 {
+    // Only substitute a fallback when crossterm returned the (0,0) sentinel (unknown
+    // size). A small-but-nonzero real size (e.g. the user dragged the window to 6
+    // rows) should be trusted so render.rs's "terminal too small" guard fires correctly
+    // and the frame is not painted at 80×24 into a 6-row window.
+    if w == 0 {
         w = env_dim("COLUMNS").filter(|&c| c >= 40).unwrap_or(80);
     }
-    if h < 10 {
+    if h == 0 {
         h = env_dim("LINES").filter(|&l| l >= 10).unwrap_or(24);
     }
     (w, h)

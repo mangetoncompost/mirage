@@ -9,12 +9,16 @@
 //! and the watcher do the same. The outer `TORRENTS.read()` is held alongside.
 //!
 //! Therefore the renderer:
-//!   1. takes `TORRENTS.read().await` — read-vs-read never blocks, the announce
-//!      paths also hold only `read()`, so no outer contention;
+//!   1. takes `TORRENTS.read().await` — read-vs-read does not contend, but a
+//!      queued watcher WRITE (add/remove) can briefly delay this read; that is
+//!      bounded because no announce holds `TORRENTS.read()` (see scheduler.rs);
 //!   2. uses `try_lock()` on each inner `Mutex`, NEVER `lock().await` — a torrent
 //!      mid-announce yields a "busy" placeholder row for that frame;
 //!   3. copies each torrent into a POD struct and drops every lock before any
 //!      stdout write.
+//!
+//! `CLIENT` is snapshotted via `try_read()` for the same reason: a queued
+//! CLIENT writer (key-renewer or `k` re-init) must not block the render loop.
 
 use crate::ui::events::UiEvent;
 
@@ -98,7 +102,7 @@ pub async fn snapshot_torrents() -> Vec<TorrentView> {
                     // Instantaneous speed off the same curve that backs the
                     // declared integral — 4 sins, synchronous, no .await. It is 0
                     // while downloading (can_upload() is false), which is correct.
-                    up_speed: t.speed_at(t.origin.elapsed().as_secs_f64()).round() as u32,
+                    up_speed: t.speed_at(t.origin.elapsed().as_secs_f64()).round().min(u32::MAX as f64) as u32,
                     uploaded: t.uploaded,
                     length: t.length,
                     left: t.declared_left(),
@@ -136,7 +140,10 @@ pub async fn snapshot_torrents() -> Vec<TorrentView> {
 }
 
 pub async fn snapshot_client() -> Option<ClientView> {
-    crate::CLIENT.read().await.as_ref().map(|c| ClientView {
+    // Use try_read so a queued CLIENT writer (key-renewer timer or `k` re-init)
+    // does not block the render loop. On contention we simply show no client info
+    // for this frame — same "busy placeholder" discipline as snapshot_torrents.
+    crate::CLIENT.try_read().ok()?.as_ref().map(|c| ClientView {
         name: c.name.clone(),
         peer_id: c.peer_id.clone(),
         key: c.key,
