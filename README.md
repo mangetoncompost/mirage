@@ -436,3 +436,7 @@ assets/
 tests/
   *.torrent            Real .torrent files used by the test suite
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
