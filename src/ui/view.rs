@@ -2,15 +2,14 @@
 //!
 //! The key reader runs on a detached OS thread (see [`super::keys`]) while the
 //! frame is built on a tokio task (see [`super::mod::run`]); they never share a
-//! lock, so the bridge between "user pressed a key" and "render this view" is two
-//! process-global atomics. This mirrors the egui side's `View` enum so the
-//! terminal and the native window stay identical.
+//! lock, so the bridge between "user pressed a key" and "render this view" is a
+//! set of process-global atomics.
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Which of the nine tabs is active. Keep in sync with the tab strip labels in
-/// `render.rs` and the egui `View` enum.
+/// `render.rs`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(usize)]
 pub enum View {
@@ -38,6 +37,15 @@ impl View {
 static ACTIVE_VIEW: AtomicUsize = AtomicUsize::new(0);
 /// Selected row within list-style views (Dashboard/Torrents/Trackers).
 static SEL: AtomicUsize = AtomicUsize::new(0);
+/// Whether the `?` help overlay is showing.
+static HELP: AtomicBool = AtomicBool::new(false);
+
+pub fn help_open() -> bool {
+    HELP.load(Ordering::Relaxed)
+}
+pub fn toggle_help() {
+    HELP.fetch_xor(true, Ordering::Relaxed);
+}
 /// The current frame's torrent info-hashes, in display order. Published by the
 /// render loop each tick so the (lock-free) key thread can resolve the selected
 /// row into a `control::Cmd` target without touching the async `TORRENTS` lock.
@@ -55,10 +63,12 @@ pub fn row_count() -> usize {
     ROWS.lock().map(|g| g.len()).unwrap_or(0)
 }
 
-/// Key thread → info-hash of the currently selected row, if any.
+/// Key thread → info-hash of the currently selected row, if any. Skips the
+/// all-zero sentinel a busy (mid-announce) row publishes, so a command never
+/// targets a placeholder.
 pub fn selected_hash() -> Option<[u8; 20]> {
     let g = ROWS.lock().ok()?;
-    g.get(sel()).copied()
+    g.get(sel()).copied().filter(|h| *h != [0u8; 20])
 }
 
 pub fn active_view() -> View {

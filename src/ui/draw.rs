@@ -10,22 +10,31 @@
 
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
+    event::{DisableBracketedPaste, EnableBracketedPaste},
     execute,
     style::ResetColor,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use std::io::{Write, stdout};
 
+/// Enter the alternate screen, raw mode, hide the cursor, and DISABLE bracketed
+/// paste. Without the last one, pasting text into the window under raw mode
+/// streams raw bytes the key thread reads as commands (a pasted 'q' would quit,
+/// 'x' would remove a torrent) — disabling it makes a paste a no-op.
+fn enter_screen() {
+    let mut o = stdout();
+    let _ = enable_raw_mode();
+    let _ = execute!(o, EnterAlternateScreen, Hide, DisableBracketedPaste);
+}
+
 /// RAII guard: `enter()` on construction, `restore()` on Drop (normal-return path).
 pub struct TermGuard;
 
 impl TermGuard {
     pub fn enter() -> Self {
-        let mut o = stdout();
         // Raw mode turns arrows into KeyCode::Up/Down and delivers Ctrl+C as the
-        // 0x03 key (no SIGINT) — the key thread reads both. Disabled in restore().
-        let _ = enable_raw_mode();
-        let _ = execute!(o, EnterAlternateScreen, Hide);
+        // 0x03 key (no SIGINT) — the key thread reads both. Undone in restore().
+        enter_screen();
         TermGuard
     }
 }
@@ -36,6 +45,12 @@ impl Drop for TermGuard {
     }
 }
 
+/// Re-establish the alt screen + raw mode after returning from a Ctrl-Z suspend
+/// (SIGCONT): the shell may have restored the normal screen and cooked mode.
+pub fn reenter() {
+    enter_screen();
+}
+
 /// Idempotent terminal restoration. Safe to call multiple times and even if the
 /// TUI never started (it just emits harmless show-cursor / reset / leave-alt).
 pub fn restore() {
@@ -43,7 +58,7 @@ pub fn restore() {
     // Disable raw mode FIRST; idempotent and safe even if it was never enabled
     // (non-TTY restore() calls, double-calls from Drop + explicit path + panic).
     let _ = disable_raw_mode();
-    let _ = execute!(o, ResetColor, Show, LeaveAlternateScreen);
+    let _ = execute!(o, EnableBracketedPaste, ResetColor, Show, LeaveAlternateScreen);
     let _ = o.flush();
 }
 

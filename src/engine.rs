@@ -48,11 +48,6 @@ pub(crate) async fn process_commands(mut rx: tokio::sync::mpsc::UnboundedReceive
                     }
                 }
             }
-            Cmd::PauseTorrent(hash) | Cmd::ResumeTorrent(hash) => {
-                // Per-torrent pause is modeled by the global pause for now; a real
-                // per-torrent flag is a follow-up. Log the intent.
-                tracing::info!("per-torrent pause/resume requested ({:?}) — use global pause", hash);
-            }
             Cmd::ReinitClient => {
                 let cfg = (**CONFIG.load()).clone();
                 if let Some(n) = config::init_client(&cfg).await {
@@ -94,7 +89,7 @@ async fn announce_then_remove(hash: [u8; 20]) {
 async fn save_config_toml() {
     let c = CONFIG.load();
     let toml = format!(
-        "client = \"{}\"\nport = {}\nmin_upload_rate = {}\nmax_upload_rate = {}\nmin_download_rate = {}\nmax_download_rate = {}\nnumwant = {}\ntorrent_dir = \"{}\"\n",
+        "client = \"{}\"\nport = {}\nmin_upload_rate = {}\nmax_upload_rate = {}\nmin_download_rate = {}\nmax_download_rate = {}\nnumwant = {}\nuse_pid_file = {}\ntorrent_dir = \"{}\"\n",
         c.client,
         c.port,
         c.min_upload_rate,
@@ -102,6 +97,7 @@ async fn save_config_toml() {
         c.min_download_rate,
         c.max_download_rate,
         c.numwant.unwrap_or(80),
+        c.use_pid_file,
         c.torrent_dir.display(),
     );
     if let Some(path) = crate::get_config_from_xdg() {

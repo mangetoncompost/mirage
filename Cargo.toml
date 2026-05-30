@@ -6,15 +6,8 @@ edition = "2024"
 keywords = ["torrent", "ratio", "upload", "cli"]
 description = "CLI tool to fake your torrent upload in order to increase your ratio."
 
-# Native macOS .app bundle (cargo bundle --release). Double-clicking the bundle
-# auto-detects it's running from Contents/MacOS/ and opens the native GUI.
-[package.metadata.bundle]
-name = "RatioUp"
-identifier = "coop.assembleurs.ratioup"
-icon = ["assets/RatioUp.icns"]
-version = "1.0.0"
-short_description = "Fake your torrent upload to grow your ratio."
-category = "public.app-category.utilities"
+# macOS launcher: scripts/make_app.sh wraps the release binary in a RatioUp.app
+# that opens the live dashboard in Terminal.app. No GUI deps, no cargo bundle.
 
 [dependencies]
 fastrand = "2.3"
@@ -49,10 +42,3 @@ plist = "1"
 # lock-free swappable config/snapshot shared between the engine and the native GUI
 arc-swap = "1.9"
 
-# native macOS GUI (egui/eframe) — used only by the --gui entry path.
-# The window is a REAL embedded terminal (egui_term = alacritty_terminal + egui)
-# that PTY-spawns this same binary in `--tty` mode, so the window is the shell
-# dashboard byte-for-byte. Pinned to a specific rev (egui_term is 0.1/git-only).
-eframe = { version = "0.34", default-features = false, features = ["wgpu", "default_fonts"] }
-egui = "0.34"
-egui_term = { git = "https://github.com/Harzu/egui_term", rev = "df910f2be512e67a8d2c4c21945f87718630041a" }

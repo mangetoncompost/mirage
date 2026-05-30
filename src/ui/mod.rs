@@ -50,31 +50,62 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
     let mut tick = tokio::time::interval(Duration::from_millis(400));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
+    // Build one frame from a fresh snapshot and paint it. Returns nothing; pure
+    // except the single stdout write in draw::paint.
+    async fn render_once(spinner: usize) {
+        let (w, h) = term_size();
+        let rows = snapshot_torrents().await;
+        // Publish row identities for the key thread, then clamp the (atomic)
+        // selection to the live count so a shrunk torrent list never leaves the
+        // cursor past the end.
+        view::set_rows(rows.iter().map(|r| r.info_hash).collect());
+        view::clamp_sel(rows.len());
+        let active = view::active_view();
+        let sel = view::sel();
+        let feed_lines = render::feed_capacity(h, rows.len(), 12);
+        let frame = Frame {
+            client: snapshot_client().await,
+            started: *crate::STARTED.get().expect("STARTED set in main before UI spawn"),
+            now: chrono::Utc::now(),
+            rows,
+            feed: events::snapshot(feed_lines),
+            feed_cap: feed_lines,
+            term_h: h as usize,
+            spinner,
+        };
+        let s = render::build_frame(&frame, w, active, sel); // pure, no locks/IO
+        draw::paint(&s);
+    }
+
+    // SIGWINCH (window resize) wakes an immediate repaint so the box reflows at
+    // once instead of waiting up to one 400ms tick. SIGCONT (resumed after a
+    // Ctrl-Z suspend) re-enters the alt screen + raw mode the shell may have
+    // dropped, then repaints. (SIGCONT = 18 on Linux/macOS; tokio has no named
+    // constructor for it, so build it from the raw number.)
+    #[cfg(unix)]
+    let (mut sigwinch, mut sigcont) = {
+        use tokio::signal::unix::{SignalKind, signal};
+        (
+            signal(SignalKind::window_change()).expect("SIGWINCH handler"),
+            signal(SignalKind::from_raw(18)).expect("SIGCONT handler"),
+        )
+    };
+
     loop {
+        #[cfg(unix)]
         tokio::select! {
             _ = tick.tick() => {
-                let (w, h) = term_size();
-                let rows = snapshot_torrents().await;
-                // Publish row identities for the key thread, then clamp the
-                // (atomic) selection to the live count so a shrunk torrent list
-                // never leaves the cursor past the end.
-                view::set_rows(rows.iter().map(|r| r.info_hash).collect());
-                view::clamp_sel(rows.len());
-                let active = view::active_view();
-                let sel = view::sel();
-                let feed_lines = render::feed_capacity(h, rows.len(), 12);
-                let frame = Frame {
-                    client: snapshot_client().await,
-                    started: *crate::STARTED.get().expect("STARTED set in main before UI spawn"),
-                    now: chrono::Utc::now(),
-                    rows,
-                    feed: events::snapshot(feed_lines),
-                    feed_cap: feed_lines,
-                    term_h: h as usize,
-                    spinner,
-                };
-                let s = render::build_frame(&frame, w, active, sel); // pure, no locks/IO
-                draw::paint(&s);
+                render_once(spinner).await;
+                spinner = spinner.wrapping_add(1);
+            }
+            _ = sigwinch.recv() => { render_once(spinner).await; }
+            _ = sigcont.recv() => { draw::reenter(); render_once(spinner).await; }
+            _ = shutdown.changed() => break,
+        }
+        #[cfg(not(unix))]
+        tokio::select! {
+            _ = tick.tick() => {
+                render_once(spinner).await;
                 spinner = spinner.wrapping_add(1);
             }
             _ = shutdown.changed() => break,

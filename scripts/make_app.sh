@@ -33,12 +33,28 @@ cat > "$APP/Contents/MacOS/RatioUp" <<'LAUNCHER'
 # Resolve the bundled binary next to this launcher.
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BIN="$HERE/ratioup-bin"
-# Open a Terminal window running RatioUp. `exec` keeps the window tied to it;
-# on exit (Ctrl+C / q) the dashboard restores the terminal cleanly.
+
+# Working dir = where the torrents live, so a relative torrent_dir (default ".")
+# resolves correctly. Order: $RATIOUP_TORRENT_DIR, else torrent_dir from the XDG
+# config, else $HOME.
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}/RatioUp/config.toml"
+WORKDIR="${RATIOUP_TORRENT_DIR:-}"
+if [[ -z "$WORKDIR" && -f "$CFG" ]]; then
+  WORKDIR="$(sed -n 's/^[[:space:]]*torrent_dir[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$CFG" | head -1)"
+fi
+[[ -z "$WORKDIR" || ! -d "$WORKDIR" ]] && WORKDIR="$HOME"
+
+# Open a Terminal window running RatioUp in that dir. `exec` makes RatioUp the
+# controlling process, so closing the window delivers SIGHUP and RatioUp shuts
+# down cleanly (announce stopped + state saved + terminal restored). Quote both
+# paths to tolerate spaces.
 osascript <<APPLESCRIPT
 tell application "Terminal"
     activate
-    do script "clear; exec '$BIN'"
+    do script "clear; cd '$WORKDIR'; exec '$BIN'"
+    set custom title of front window to "RatioUp"
+    set number of columns of front window to 110
+    set number of rows of front window to 34
 end tell
 APPLESCRIPT
 LAUNCHER

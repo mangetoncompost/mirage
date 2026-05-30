@@ -74,30 +74,28 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                     // nudge the global upload multiplier.
                     (KeyCode::Char('+' | '='), _) => speed_edit(active, 1),
                     (KeyCode::Char('-' | '_'), _) => speed_edit(active, -1),
-                    // Pause/resume: a selected torrent on Torrents, else global.
+                    // Toggle the help overlay.
+                    (KeyCode::Char('?'), _) => view::toggle_help(),
+                    // Pause / resume are GLOBAL (per-torrent pause isn't modeled
+                    // in the engine): p toggles, r force-resumes.
                     (KeyCode::Char('p'), _) => {
-                        if active == View::Torrents {
-                            if let Some(h) = view::selected_hash() {
-                                control::send(Cmd::PauseTorrent(h));
-                            }
-                        } else {
-                            control::toggle_paused();
-                        }
+                        control::toggle_paused();
                     }
                     (KeyCode::Char('r'), _) => {
-                        if active == View::Torrents {
-                            if let Some(h) = view::selected_hash() {
-                                control::send(Cmd::ResumeTorrent(h));
-                            }
-                        }
+                        control::set_paused(false);
                     }
+                    // Force announce / remove act on the selected row of a list
+                    // view (Dashboard/Torrents/Trackers); selected_hash skips the
+                    // busy sentinel.
                     (KeyCode::Char('f'), _) => {
-                        if let Some(h) = view::selected_hash() {
-                            control::send(Cmd::ForceAnnounce(h));
+                        if is_list_view(active) {
+                            if let Some(h) = view::selected_hash() {
+                                control::send(Cmd::ForceAnnounce(h));
+                            }
                         }
                     }
                     (KeyCode::Char('x'), _) => {
-                        if active == View::Torrents {
+                        if is_list_view(active) {
                             if let Some(h) = view::selected_hash() {
                                 control::send(Cmd::Remove(h));
                             }
@@ -113,6 +111,14 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                             control::send(Cmd::SaveConfig);
                         }
                     }
+                    // Esc closes the help overlay, else returns to the Dashboard.
+                    (KeyCode::Esc, _) => {
+                        if view::help_open() {
+                            view::toggle_help();
+                        } else {
+                            view::set_view(0);
+                        }
+                    }
                     // Ctrl+C arrives as a KEY (0x03) because raw mode ate SIGINT.
                     (KeyCode::Char('c'), KeyModifiers::CONTROL) | (KeyCode::Char('q'), _) => {
                         let _ = notify.send(()); // wake the shutdown coordinator
@@ -122,6 +128,12 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                 }
             }
         });
+}
+
+/// The views that show a selectable list of torrents (so f/x target a row).
+fn is_list_view(v: crate::ui::view::View) -> bool {
+    use crate::ui::view::View;
+    matches!(v, View::Dashboard | View::Torrents | View::Trackers)
 }
 
 /// Left/Right editing for the Speeds view: edit the selected setting row (rates
