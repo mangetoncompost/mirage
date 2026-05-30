@@ -86,7 +86,7 @@ mod tests {
     use crate::json_output::writable;
     #[test]
     fn test_writable() {
-        assert!(writable("/dev/null"));
+        assert!(writable("/tmp/mirage_test.json"));
 
         // case with non writable folder
         let unwritable = "/tmp/unwritable";
