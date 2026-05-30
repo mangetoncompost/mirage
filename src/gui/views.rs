@@ -1,211 +1,343 @@
-//! The shell-styled views rendered into the central panel. All data comes from
-//! the lock-free snapshot; all actions send atomics/Cmds — never block.
+//! All views rendered as pure monospace "terminal" screens (box-drawing,
+//! aligned columns, ASCII bars) reading the live snapshot — the native twin of
+//! mockup/RatioUp_shell.html. Interaction is keyboard + the bottom REPL.
 
-use egui::{Color32, RichText};
-use egui_extras::{Column, TableBuilder};
-
-use super::app::RatioUpApp;
+use super::app::{RatioUpApp, View};
+use super::term::{self, Line, Screen, bar, lpad, rpad};
 use super::theme;
-use crate::control::{self, Cmd, TorrentView};
+use crate::control::TorrentView;
 use crate::utils::format_bytes_u64 as fb;
 
-fn dot(t: &TorrentView) -> (RichText, Color32) {
-    let c = if t.error_count > 0 {
+const SPIN: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+fn dotcol(t: &TorrentView) -> egui::Color32 {
+    if t.error_count > 0 {
         theme::RD
-    } else if t.paused {
-        theme::DIM
     } else if t.downloading {
         theme::YL
     } else if t.up_speed > 0 {
         theme::GN
     } else {
         theme::DIM
-    };
-    (RichText::new("●").color(c), c)
+    }
 }
-
 fn mmss(s: u64) -> String {
     format!("{:02}:{:02}", s / 60, s % 60)
 }
+fn hms(s: u64) -> String {
+    format!("{:02}:{:02}:{:02}", s / 3600, (s % 3600) / 60, s % 60)
+}
 
-pub fn dashboard(app: &mut RatioUpApp, ui: &mut egui::Ui) {
-    let snap = app.snap.clone();
+/// Header + tab strip shared by every view.
+fn chrome(app: &RatioUpApp, sc: &mut Screen) {
+    let mult = crate::torrent::speed_multiplier();
+    let up = app.uptime_secs();
+    // top border with title + spinner + mult + uptime
+    let l = sc.line();
+    l.push("╭", theme::LINE);
+    l.push(" ›Ratio ", theme::CY);
+    let right = format!(" {}  x{:.2}  up {} ", SPIN[app.spin % 10], mult, hms(up));
+    let used = 1 + " ›Ratio ".chars().count() + right.chars().count();
+    if used < term::W + 2 {
+        l.push("─".repeat(term::W + 2 - used), theme::LINE);
+    }
+    l.push(right, theme::DIM);
+    l.push("╮", theme::LINE);
+    // tab strip
+    sc.bordered(|l| {
+        for (i, name) in ["dash", "tor", "trk", "spd", "cli", "sch", "net", "log", "cfg"]
+            .iter()
+            .enumerate()
+        {
+            let on = app.view as usize == i;
+            let lbl = format!(" [{}]{} ", i + 1, name);
+            l.push(lbl, if on { theme::CY } else { theme::DIM });
+        }
+    });
+    sc.rule("├", "┤", None);
+}
+
+pub fn render(app: &mut RatioUpApp, ui: &mut egui::Ui) {
+    let mut sc = Screen::new();
+    chrome(app, &mut sc);
+    match app.view {
+        View::Dashboard => v_dash(app, &mut sc),
+        View::Torrents => v_tor(app, &mut sc),
+        View::Trackers => v_trk(app, &mut sc),
+        View::Speeds => v_spd(app, &mut sc),
+        View::Client => v_cli(app, &mut sc),
+        View::Schedule => v_sch(app, &mut sc),
+        View::Network => v_net(app, &mut sc),
+        View::Logs => v_log(app, &mut sc),
+        View::Config => v_cfg(app, &mut sc),
+    }
+    sc.rule("╰", "╯", None);
+    sc.show(ui);
+}
+
+fn v_dash(app: &RatioUpApp, sc: &mut Screen) {
+    let snap = &app.snap;
     if let Some(cl) = &snap.client {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("client").color(theme::DIM));
-            ui.label(RichText::new(&cl.name).color(theme::FG).strong());
-            ui.label(RichText::new("peer").color(theme::DIM));
-            ui.label(RichText::new(&cl.peer_id).color(theme::DIM));
-            ui.label(RichText::new("key").color(theme::DIM));
-            ui.label(RichText::new(&cl.key).color(theme::DIM));
+        sc.bordered(|l| {
+            l.push(" client ", theme::DIM);
+            l.push(cl.name.clone(), theme::FG);
+            l.push("  peer ", theme::DIM);
+            l.push(format!("{}…", cl.peer_id.chars().take(14).collect::<String>()), theme::DIM);
+            l.push("  key ", theme::DIM);
+            l.push(cl.key.clone(), theme::DIM);
         });
     }
-    ui.separator();
-    torrent_table(app, ui, true);
-}
-
-pub fn torrents(app: &mut RatioUpApp, ui: &mut egui::Ui) {
-    ui.label(RichText::new("Torrents — click a row, act below").color(theme::DIM));
-    torrent_table(app, ui, false);
-    ui.separator();
-    // per-selected actions
-    let snap = app.snap.clone();
-    if let Some(t) = snap.rows.get(app.sel) {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(&t.name).color(theme::CY));
-            if ui.button(if t.paused { "resume" } else { "pause" }).clicked() {
-                control::send(if t.paused { Cmd::ResumeTorrent(t.info_hash) } else { Cmd::PauseTorrent(t.info_hash) });
-            }
-            if ui.button("force announce").clicked() {
-                control::send(Cmd::ForceAnnounce(t.info_hash));
-            }
-            if ui.button(RichText::new("remove").color(theme::RD)).clicked() {
-                control::send(Cmd::Remove(t.info_hash));
-            }
-        });
-    }
-}
-
-fn torrent_table(app: &mut RatioUpApp, ui: &mut egui::Ui, compact: bool) {
-    let snap = app.snap.clone();
-    let mut clicked: Option<usize> = None;
-    TableBuilder::new(ui)
-        .striped(true)
-        .column(Column::auto().at_least(18.0))
-        .column(Column::remainder().at_least(160.0))
-        .column(Column::auto().at_least(40.0))
-        .column(Column::auto().at_least(40.0))
-        .column(Column::auto().at_least(80.0))
-        .column(Column::auto().at_least(80.0))
-        .column(Column::auto().at_least(64.0))
-        .column(Column::auto().at_least(60.0))
-        .header(18.0, |mut h| {
-            for t in ["", "TORRENT", "S", "L", "↑ SPEED", "UPLOADED", "NEXT", "STATE"] {
-                h.col(|ui| { ui.label(RichText::new(t).color(theme::DIM).small()); });
-            }
-        })
-        .body(|mut body| {
-            for (i, t) in snap.rows.iter().enumerate() {
-                body.row(20.0, |mut row| {
-                    let (d, _) = dot(t);
-                    row.col(|ui| { ui.label(d); });
-                    row.col(|ui| {
-                        let name = RichText::new(&t.name).color(if i == app.sel { theme::FG } else { theme::FG });
-                        if ui.selectable_label(i == app.sel, name).clicked() { clicked = Some(i); }
-                    });
-                    let scol = if t.seeders > 5 { theme::GN } else if t.seeders > 0 { theme::YL } else { theme::DIM };
-                    row.col(|ui| { ui.label(RichText::new(if t.error_count>0 {"-".into()} else {t.seeders.to_string()}).color(scol)); });
-                    let lcol = if t.leechers > 0 { theme::GN } else { theme::DIM };
-                    row.col(|ui| { ui.label(RichText::new(if t.error_count>0 {"-".into()} else {t.leechers.to_string()}).color(lcol)); });
-                    row.col(|ui| {
-                        let (s, c) = if t.downloading {
-                            (format!("DL {}%", t.dl_percent), theme::YL)
-                        } else if t.up_speed > 0 {
-                            (format!("{}/s", fb(t.up_speed as u64)), theme::YL)
-                        } else {
-                            ("idle".into(), theme::DIM)
-                        };
-                        ui.label(RichText::new(s).color(c));
-                    });
-                    row.col(|ui| { ui.label(RichText::new(fb(t.uploaded)).color(theme::FG)); });
-                    row.col(|ui| {
-                        let nx = if t.paused || t.error_count > 0 { "--".into() } else { mmss(t.secs_to_announce) };
-                        ui.label(RichText::new(nx).color(theme::DIM));
-                    });
-                    row.col(|ui| {
-                        let st = if t.downloading { "leech" } else if t.paused { "paused" } else if t.error_count>0 { "error" } else { "seed" };
-                        ui.label(RichText::new(st).color(theme::DIM));
-                    });
-                });
-            }
-        });
-    if let Some(i) = clicked { app.sel = i; }
-    let _ = compact;
-}
-
-pub fn speeds(app: &mut RatioUpApp, ui: &mut egui::Ui) {
-    ui.heading(RichText::new("Speeds").color(theme::CY));
-    ui.add_space(6.0);
-    let d = &mut app.draft;
-    let mb = 1024 * 1024;
-    rate_slider(ui, "min upload", &mut d.min_up, 8 * 1024, 64 * mb);
-    rate_slider(ui, "max upload", &mut d.max_up, 8 * 1024, 64 * mb);
-    rate_slider(ui, "min download", &mut d.min_dl, 8 * 1024, 128 * mb);
-    rate_slider(ui, "max download", &mut d.max_dl, 8 * 1024, 128 * mb);
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("numwant").color(theme::DIM));
-        ui.add(egui::DragValue::new(&mut d.numwant).range(1..=200));
-    });
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("multiplier").color(theme::DIM));
-        ui.label(RichText::new(format!("x{:.2}", crate::torrent::speed_multiplier())).color(theme::YL));
-        if ui.button("−").clicked() { crate::torrent::bump_multiplier(-1); }
-        if ui.button("+").clicked() { crate::torrent::bump_multiplier(1); }
-    });
-    ui.add_space(8.0);
-    if ui.button(RichText::new("apply + save config").color(theme::GN)).clicked() {
-        // clamp and store live
-        let mut c = (**crate::CONFIG.load()).clone();
-        c.min_upload_rate = d.min_up.min(d.max_up);
-        c.max_upload_rate = d.max_up.max(d.min_up);
-        c.min_download_rate = d.min_dl.min(d.max_dl);
-        c.max_download_rate = d.max_dl.max(d.min_dl);
-        c.numwant = Some(d.numwant);
-        crate::CONFIG.store(std::sync::Arc::new(c));
-        control::send(Cmd::SaveConfig);
-    }
-}
-
-fn rate_slider(ui: &mut egui::Ui, label: &str, val: &mut u32, lo: u32, hi: u32) {
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("{label:<14}")).color(theme::DIM));
-        let mut v = *val as f64;
-        ui.add(egui::Slider::new(&mut v, lo as f64..=hi as f64).logarithmic(true).show_value(false));
-        *val = v as u32;
-        ui.label(RichText::new(format!("{}/s", fb(*val as u64))).color(theme::YL));
-    });
-}
-
-pub fn client(app: &mut RatioUpApp, ui: &mut egui::Ui) {
-    ui.heading(RichText::new("Client & Stealth").color(theme::CY));
-    ui.add_space(6.0);
-    let snap = app.snap.clone();
-    if let Some(cl) = &snap.client {
-        kv(ui, "client", &cl.name, theme::FG);
-        kv(ui, "peer_id", &cl.peer_id, theme::DIM);
-        kv(ui, "user-agent", &cl.user_agent, theme::DIM);
-        kv(ui, "key", &cl.key, theme::DIM);
-    }
-    ui.add_space(8.0);
-    if ui.button("re-init client (new key)").clicked() {
-        control::send(Cmd::ReinitClient);
-    }
-    ui.add_space(8.0);
-    ui.label(RichText::new("what the tracker sees:").color(theme::DIM));
-    if let Some(cl) = &snap.client {
-        ui.label(
-            RichText::new(format!(
-                "GET /announce?info_hash=…&peer_id={}&key={}&numwant={}&compact=1&event=started",
-                cl.peer_id, cl.key, crate::CONFIG.load().numwant.unwrap_or(80)
-            ))
-            .color(theme::DIM)
-            .monospace(),
+    // header row
+    sc.bordered(|l| {
+        l.push(
+            format!(
+                " {}{}{}{}{}{}",
+                lpad("TORRENT", 24),
+                lpad("S", 5),
+                lpad("L", 5),
+                lpad("UP/s", 9),
+                lpad("TOTAL", 7),
+                "NEXT"
+            ),
+            theme::DIM,
         );
+    });
+    let sel = app.sel;
+    for (i, t) in snap.rows.iter().take(12).enumerate() {
+        sc.bordered(|l| torrent_row(l, t, i == sel));
     }
+    // selected progress
+    if let Some(t) = snap.rows.get(sel) {
+        sc.bordered(|l| {
+            l.push(format!(" {} ", lpad(if t.downloading { "downloading" } else { "next announce" }, 13)), theme::DIM);
+            let (done, total) = if t.downloading {
+                (t.dl_percent as u64, 100)
+            } else {
+                (t.interval.saturating_sub(t.secs_to_announce), t.interval.max(1))
+            };
+            bar(l, done, total, 30, t.downloading);
+        });
+    }
+    sc.rule("├", "┤", Some("recent"));
+    // footer totals (the engine doesn't expose an event feed to the snapshot yet)
+    sc.bordered(|l| {
+        l.push(" tip: ", theme::DIM);
+        l.push("logs print to the terminal you launched from", theme::DIM);
+    });
+    sc.rule("├", "┤", None);
+    footer(app, sc);
 }
 
-fn kv(ui: &mut egui::Ui, k: &str, v: &str, c: Color32) {
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("{k:<12}")).color(theme::DIM));
-        ui.label(RichText::new(v).color(c));
+fn torrent_row(l: &mut Line, t: &TorrentView, sel: bool) {
+    l.push(" ", theme::FG);
+    l.push("●", dotcol(t));
+    l.push(" ", theme::FG);
+    l.push(lpad(&t.name, 22), if sel { theme::CY } else { theme::FG });
+    l.push(rpad(if t.error_count > 0 { "-".into() } else { t.seeders.to_string() }, 5),
+        if t.error_count > 0 { theme::DIM } else { theme::GN });
+    l.push(rpad(if t.error_count > 0 { "-".into() } else { t.leechers.to_string() }, 5),
+        if t.leechers > 0 { theme::GN } else { theme::DIM });
+    let sp = if t.downloading {
+        format!("DL{}%", t.dl_percent)
+    } else if t.up_speed > 0 {
+        fb(t.up_speed as u64)
+    } else {
+        "idle".into()
+    };
+    l.push(lpad(format!("  {sp}"), 9), if t.downloading || t.up_speed > 0 { theme::YL } else { theme::DIM });
+    l.push(lpad(format!(" {}", fb(t.uploaded)), 7), theme::FG);
+    let nx = if t.error_count > 0 { "--".into() } else { mmss(t.secs_to_announce) };
+    l.push(format!(" {nx}"), theme::DIM);
+}
+
+fn v_tor(app: &RatioUpApp, sc: &mut Screen) {
+    sc.bordered(|l| {
+        l.push(
+            format!(" {}{}{}{}{}{}", lpad(" #", 4), lpad("NAME", 22), lpad("STATE", 9), lpad("S", 5), lpad("L", 5), "UPLOAD"),
+            theme::DIM,
+        );
+    });
+    for (i, t) in app.snap.rows.iter().enumerate() {
+        sc.bordered(|l| {
+            l.push(rpad(i + 1, 3), theme::DIM);
+            l.push(" ", theme::FG);
+            l.push("●", dotcol(t));
+            l.push(" ", theme::FG);
+            l.push(lpad(&t.name, 21), if i == app.sel { theme::CY } else { theme::FG });
+            let st = if t.downloading { format!("DL{}%", t.dl_percent) } else if t.error_count > 0 { "error".into() } else { "seed".into() };
+            l.push(lpad(st, 9), theme::DIM);
+            l.push(rpad(t.seeders, 5), theme::GN);
+            l.push(rpad(t.leechers, 5), if t.leechers > 0 { theme::GN } else { theme::DIM });
+            l.push(lpad(format!(" {}", fb(t.uploaded)), 8), theme::FG);
+        });
+    }
+    sc.rule("├", "┤", None);
+    sc.bordered(|l| {
+        l.push(" ↵ ", theme::CY);
+        l.push("detail   ", theme::DIM);
+        l.push("p ", theme::CY);
+        l.push("pause-row   ", theme::DIM);
+        l.push("f ", theme::CY);
+        l.push("force   ", theme::DIM);
+        l.push("x ", theme::RD);
+        l.push("remove", theme::DIM);
+    });
+    footer(app, sc);
+}
+
+fn v_trk(app: &RatioUpApp, sc: &mut Screen) {
+    sc.bordered(|l| l.push(" per-torrent trackers (snapshot)", theme::DIM));
+    for t in app.snap.rows.iter() {
+        sc.bordered(|l| {
+            l.push(" ", theme::FG);
+            l.push("●", dotcol(t));
+            l.push(format!(" {}", lpad(&t.name, 40)), theme::CY);
+            l.push(format!("S{} L{}", t.seeders, t.leechers), theme::GN);
+        });
+    }
+    sc.bordered(|l| l.push(" (per-tracker S/L/RTT are in the engine; surfaced here next)", theme::DIM));
+    footer(app, sc);
+}
+
+fn v_spd(app: &RatioUpApp, sc: &mut Screen) {
+    let c = crate::CONFIG.load();
+    sc.rule("├", "┤", Some("upload band"));
+    setting_num(sc, app, 0, "min upload", &format!("{}/s", fb(c.min_upload_rate as u64)));
+    setting_num(sc, app, 1, "max upload", &format!("{}/s", fb(c.max_upload_rate as u64)));
+    setting_sel(sc, app, 2, "multiplier", &format!("x{:.2}", crate::torrent::speed_multiplier()));
+    sc.rule("├", "┤", Some("download phase"));
+    setting_num(sc, app, 3, "min download", &format!("{}/s", fb(c.min_download_rate as u64)));
+    setting_num(sc, app, 4, "max download", &format!("{}/s", fb(c.max_download_rate as u64)));
+    setting_num(sc, app, 5, "numwant", &c.numwant.unwrap_or(80).to_string());
+    sc.rule("├", "┤", Some("total upload (live)"));
+    sc.bordered(|l| {
+        l.push("  up ", theme::DIM);
+        l.push(format!("{}/s", fb(app.snap.total_up_speed)), theme::YL);
+        l.push("   Σ ", theme::DIM);
+        l.push(fb(app.snap.total_uploaded), theme::GN);
+    });
+    footer(app, sc);
+}
+
+fn v_cli(app: &RatioUpApp, sc: &mut Screen) {
+    if let Some(cl) = &app.snap.client {
+        kv(sc, "client", &cl.name, theme::FG);
+        kv(sc, "peer_id", &cl.peer_id, theme::DIM);
+        kv(sc, "user-agent", &cl.user_agent, theme::DIM);
+        kv(sc, "key", &cl.key, theme::DIM);
+        let c = crate::CONFIG.load();
+        kv(sc, "download phase", "on (leech → completed → seed)", theme::GN);
+        sc.rule("├", "┤", Some("what the tracker sees"));
+        sc.bordered(|l| {
+            l.push(
+                format!(" GET /announce?peer_id={}&numwant={}&key={}&event=started",
+                    cl.peer_id, c.numwant.unwrap_or(80), cl.key),
+                theme::DIM,
+            );
+        });
+        sc.bordered(|l| {
+            l.push(" k ", theme::CY);
+            l.push("re-init client (new key)", theme::DIM);
+        });
+    }
+    footer(app, sc);
+}
+
+fn v_sch(app: &RatioUpApp, sc: &mut Screen) {
+    sc.bordered(|l| l.push(" seed mode    always  (night/custom: roadmap)", theme::DIM));
+    sc.bordered(|l| {
+        l.push(" global       ", theme::DIM);
+        if app.snap.paused {
+            l.push("[ ] paused", theme::RD);
+        } else {
+            l.push("[x] running", theme::GN);
+        }
+        l.push("   (p to toggle)", theme::DIM);
+    });
+    footer(app, sc);
+}
+
+fn v_net(app: &RatioUpApp, sc: &mut Screen) {
+    let c = crate::CONFIG.load();
+    kv(sc, "port", &c.port.to_string(), theme::YL);
+    kv(sc, "numwant", &c.numwant.unwrap_or(80).to_string(), theme::YL);
+    kv(sc, "torrent dir", &c.torrent_dir.display().to_string(), theme::DIM);
+    kv(sc, "pid file", if c.use_pid_file { "on" } else { "off" }, theme::DIM);
+    footer(app, sc);
+}
+
+fn v_log(app: &RatioUpApp, sc: &mut Screen) {
+    sc.bordered(|l| l.push(" live tracing logs print to the launching terminal", theme::DIM));
+    sc.bordered(|l| l.push(" (run RatioUp from a terminal to see them, or use TTY mode)", theme::DIM));
+    footer(app, sc);
+}
+
+fn v_cfg(app: &RatioUpApp, sc: &mut Screen) {
+    let c = crate::CONFIG.load();
+    sc.rule("├", "┤", Some("config.toml"));
+    let kvc = |sc: &mut Screen, k: &str, v: String, col| {
+        sc.bordered(|l| {
+            l.push(format!(" {} = ", lpad(k, 18)), theme::DIM);
+            l.push(v, col);
+        });
+    };
+    kvc(sc, "client", format!("\"{}\"", c.client), theme::GN);
+    kvc(sc, "port", c.port.to_string(), theme::YL);
+    kvc(sc, "min_upload_rate", c.min_upload_rate.to_string(), theme::YL);
+    kvc(sc, "max_upload_rate", c.max_upload_rate.to_string(), theme::YL);
+    kvc(sc, "min_download_rate", c.min_download_rate.to_string(), theme::YL);
+    kvc(sc, "max_download_rate", c.max_download_rate.to_string(), theme::YL);
+    kvc(sc, "numwant", c.numwant.unwrap_or(80).to_string(), theme::YL);
+    sc.bordered(|l| {
+        l.push(" s ", theme::CY);
+        l.push("save config.toml", theme::DIM);
+    });
+    footer(app, sc);
+}
+
+fn footer(app: &RatioUpApp, sc: &mut Screen) {
+    let s = &app.snap;
+    sc.bordered(|l| {
+        l.push(format!(" {} torrents  ", s.rows.len()), theme::FG);
+        l.push(format!("↑ {}  ", fb(s.total_uploaded)), theme::GN);
+        l.push(format!("up {}/s  ", fb(s.total_up_speed)), theme::YL);
+        if s.error_count > 0 {
+            l.push(format!("err {}", s.error_count), theme::RD);
+        } else {
+            l.push("err 0", theme::DIM);
+        }
+        if s.paused {
+            l.push("  [PAUSED]", theme::RD);
+        }
     });
 }
 
-pub fn logs(_app: &mut RatioUpApp, ui: &mut egui::Ui) {
-    ui.heading(RichText::new("Logs").color(theme::CY));
-    ui.add_space(6.0);
-    ui.label(
-        RichText::new("Live tracing logs print to stderr (run from a terminal to see them).\nThe dashboard event feed is in the TTY mode.")
-            .color(theme::DIM),
-    );
+fn kv(sc: &mut Screen, k: &str, v: &str, col: egui::Color32) {
+    sc.bordered(|l| {
+        l.push(format!(" {} ", lpad(k, 14)), theme::DIM);
+        l.push(v.to_string(), col);
+    });
+}
+
+// settings rows highlight when selected (app.sel indexes selectable rows in the view)
+fn setting_num(sc: &mut Screen, app: &RatioUpApp, idx: usize, label: &str, val: &str) {
+    let on = app.sel == idx;
+    sc.bordered(|l| {
+        l.push(format!(" {} ", lpad(label, 14)), if on { theme::CY } else { theme::DIM });
+        l.push("[ ", theme::DIM);
+        l.push(lpad(val, 13), theme::YL);
+        l.push("]", theme::DIM);
+        if on {
+            l.push("  ◂ ◂/▸ edit ▸", theme::CY);
+        }
+    });
+}
+fn setting_sel(sc: &mut Screen, app: &RatioUpApp, idx: usize, label: &str, val: &str) {
+    let on = app.sel == idx;
+    sc.bordered(|l| {
+        l.push(format!(" {} ", lpad(label, 14)), if on { theme::CY } else { theme::DIM });
+        l.push("◂ ", theme::DIM);
+        l.push(lpad(val, 13), theme::CY);
+        l.push("▸", theme::DIM);
+    });
 }
