@@ -58,7 +58,7 @@ sha1_smol = "1.0"
 notify = "8.0"
 
 # live terminal UI (super-shell dashboard)
-crossterm = "0.28"
+crossterm = "0.29"
 
 # read the installed Transmission version (Info.plist, binary or XML) for client="auto"
 plist = "1"
