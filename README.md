@@ -218,6 +218,19 @@ use_pid_file = false
 # Path to a JSON stats file written after each scheduler tick.
 # Optional; no file is written if absent.
 output_stats = "/tmp/mirage.json"
+
+# Discreet desktop notification on each ratio milestone (1.0, 1.5, 2.0, 3.0,
+# 5.0, 10.0). Off by default. When on, Mirage emits a terminal OSC 9 escape
+# (shown natively by terminals that support it) and a best-effort osascript
+# (macOS) / notify-send (Linux) notification. No terminal bell is ever used.
+notify_milestones = false
+
+# Swarm-proportional upload cap (KiB/s of fake upload budget per leecher).
+# Optional; absent means the speed curve ignores swarm size (original behaviour).
+# When set, each torrent's fake speed scales with its leecher count toward
+# max_upload_rate, so Mirage never declares near-line-speed to an almost empty
+# swarm (a common ratio-faking tell). Example: 64 = 64 KiB/s per leecher.
+per_leecher_kib_s = 64
 ```
 
 A specific config file can be passed at launch:
@@ -273,8 +286,9 @@ the dashboard feed.
 
 When stdout is an interactive terminal and `MIRAGE_NO_UI` is not set, Mirage
 enters the alternate screen and displays a full-screen dashboard redrawn
-approximately 2.5 times per second. The dashboard is composed of nine tabs
-navigated by number keys 1-9, the Left/Right arrow keys, or `h`/`l`.
+approximately 2.5 times per second. The dashboard is composed of ten tabs
+navigated by number keys 1-9 and 0 (the ratio graph), the Left/Right arrow
+keys, or `h`/`l`.
 
 The dashboard captures key input in raw mode. Bracketed paste is disabled so
 pasting text into the window does not trigger accidental commands.
@@ -298,7 +312,10 @@ shows `DL NN%`.
 **2 tor** - Full torrent list with state (downloading/seeding/error), seeder and
 leecher counts, and total uploaded per torrent.
 
-**3 trk** - Per-torrent tracker URLs with current seeder and leecher counts.
+**3 trk** - Per-torrent tracker host with current seeder and leecher counts.
+Press `g` to toggle a by-tracker rollup: one row per host with the torrent
+count, summed upload, summed speed, summed seeders/leechers, and error count,
+sorted by upload. Press `g` again to return to the per-torrent view.
 
 **4 spd** - Upload and download speed band editor, multiplier, and numwant. Use
 Up/Down to move between the six settings rows and +/- to double or halve values.
@@ -318,6 +335,19 @@ for up to 50 entries).
 **9 cfg** - Mirror of the active `config.toml` values. The `s` key saves the
 current config to disk.
 
+**0 rto** - Cumulative upload graph over the session, a summary line (uptime,
+total uploaded, peak speed), and an ETA to the next ratio milestone projected
+from the average credited rate (hidden until there is enough history).
+
+The per-torrent detail card (Enter on a list row) has two sub-tabs: `i` info
+(name, totals, trackers, state) and `w` wire (the last announce exchange: the
+request URL or summary, the response status, and the response body).
+
+Press `!` from any tab to open the plausibility linter: a read-only card that
+flags settings a private tracker might find implausible (upload far past the
+torrent size, near-line-speed upload to an almost empty swarm). Press `!` or
+`Esc` to close.
+
 ### Keys
 
 Navigation:
@@ -328,8 +358,11 @@ Navigation:
 | Left, Right or h, l | Previous / next tab |
 | Up, Down or k, j | Select row on list and Speeds tabs |
 | Up, Down | Walk the upload multiplier on non-list tabs |
-| Esc | Back to Dashboard, or close the help overlay |
+| Enter | Open the detail card for the selected torrent |
+| Esc | Back to Dashboard, or close the open overlay |
 | ? | Toggle the help overlay |
+| ! | Toggle the plausibility linter overlay |
+| : | Open the command palette (fuzzy-search all actions) |
 
 Actions:
 
@@ -339,6 +372,11 @@ Actions:
 | x | Remove the selected/marked torrent(s); asks `y`/`Esc` to confirm (announces Stopped) |
 | p | Toggle global pause (all upload stops) |
 | r | Resume (clear global pause) |
+| Space | Toggle the multi-select mark on the selected row |
+| a / A | Mark all visible rows / clear all marks |
+| e | Export the session snapshot to JSON (and the clipboard) |
+| g | On Trackers tab: toggle per-torrent / by-tracker view |
+| i / w | In the detail card: info / wire sub-tab |
 | + or = | On Speeds tab: double the selected rate; elsewhere: increase multiplier |
 | - or _ | On Speeds tab: halve the selected rate; elsewhere: decrease multiplier |
 | k | On Client tab: re-init the emulated client (new key) |
