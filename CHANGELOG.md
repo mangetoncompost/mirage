@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.3.4 - 2026-05-31
+
+### Fixed
+
+- The torrent directory is now resolved to an absolute path, so Mirage reads the same folder whether launched from a terminal or the macOS app. A relative `torrent_dir` in the config is anchored to the config file's directory instead of the process working directory, which previously made the app find no torrents when opened from Applications
+
+### Changed
+
+- The default `torrent_dir` is now `~/Downloads/Mirage` (absolute and visible) instead of a `torrents/` folder relative to the launch directory. The macOS launcher no longer needs to guess a working directory
+
 ## v1.3.3 - 2026-05-31
 
 ### Fixed

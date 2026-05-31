@@ -999,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "mirage-tui"
-version = "1.3.3"
+version = "1.3.4"
 dependencies = [
  "arc-swap",
  "chrono",
