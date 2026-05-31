@@ -10,7 +10,7 @@ use reqwest::Client as ReqwestClient;
 use tracing::{debug, error, info, trace, warn};
 use url::{Host, Url};
 
-/// Shared HTTP client — built once at first use and reused across all announces.
+/// Shared HTTP client - built once at first use and reused across all announces.
 /// The User-Agent is NOT baked in here; it is injected per-request via the headers
 /// returned by `client.get_query()`, so changing the emulated client profile with `k`
 /// is reflected immediately without needing to rebuild the pool.
@@ -97,7 +97,7 @@ fn count_peers(v: Option<&BencodeValue>, record_len: usize) -> u64 {
 }
 
 /// After a STARTED announce, a real client doesn't wait the tracker's full
-/// interval (often 30 min) before its first stats update — it reports progress
+/// interval (often 30 min) before its first stats update - it reports progress
 /// fairly soon. We mirror that: once the STARTED response tells us the swarm has
 /// peers to "upload" to, schedule the *next* announce after a short randomized
 /// warm-up delay instead of the full interval, so fake upload starts promptly.
@@ -143,7 +143,7 @@ pub fn apply_warmup(t: &mut Torrent) -> u64 {
 
 /// Periodic re-check pacing: if the torrent still can't upload (0 leechers) but
 /// the swarm is alive (has seeders), poll again in 5-10 min instead of waiting
-/// the tracker's full interval (up to ~1h) — so a leecher that appears is caught
+/// the tracker's full interval (up to ~1h) - so a leecher that appears is caught
 /// quickly. If it CAN upload, leave the tracker's interval as-is (normal cadence;
 /// we must NOT keep hammering at warm-up speed, which risks a ban). Returns wait.
 pub fn apply_recheck(t: &mut Torrent) -> u64 {
@@ -413,7 +413,7 @@ async fn announce_http(
     // (The query template is built inside build_url, not from here.)
     let (_url_template, headers_to_set) = client.get_query();
     // Inject the key as 8 uppercase hex (constant per session), like a real
-    // Transmission — not the decimal `client.key.to_string()` used before.
+    // Transmission - not the decimal `client.key.to_string()` used before.
     let key_hex = crate::config::KEY_HEX.load().as_str().to_string();
     let (built_url, uploaded) =
         build_url(url, torrent, client, event, key_hex, pre_loop_uploaded).await;
@@ -624,7 +624,7 @@ pub async fn build_url(
 ) -> (String, u64) {
     info!("Torrent {:?}: {}", event, torrent.name);
     // `uploaded` is the pre-computed delta passed in by announce() before the
-    // per-URL loop — see the comment there. This function no longer recomputes
+    // per-URL loop - see the comment there. This function no longer recomputes
     // it from last_announce so that every tracker in the list receives the
     // same declared window.
 

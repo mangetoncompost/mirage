@@ -24,13 +24,13 @@ use std::sync::Mutex;
 /// Enter the alternate screen, raw mode, hide the cursor, and DISABLE bracketed
 /// paste. Without the last one, pasting text into the window under raw mode
 /// streams raw bytes the key thread reads as commands (a pasted 'q' would quit,
-/// 'x' would remove a torrent) — disabling it makes a paste a no-op.
+/// 'x' would remove a torrent) - disabling it makes a paste a no-op.
 ///
 /// We clear AFTER entering the alt screen. `EnterAlternateScreen` preserves the
 /// cursor's row, so without `Clear(All)`+home the first frame paints wherever the
 /// cursor sat (mid-screen, pushing the box down). And macOS Terminal.app keeps
 /// the *main* screen's scrollback reachable even inside the alt screen, so we
-/// also `Clear(Purge)` (ESC[3J) to wipe that scrollback — otherwise you can
+/// also `Clear(Purge)` (ESC[3J) to wipe that scrollback - otherwise you can
 /// scroll up and see the shell/clear output behind the dashboard.
 fn enter_screen() {
     let mut o = stdout();
@@ -52,7 +52,7 @@ pub struct TermGuard;
 impl TermGuard {
     pub fn enter() -> Self {
         // Raw mode turns arrows into KeyCode::Up/Down and delivers Ctrl+C as the
-        // 0x03 key (no SIGINT) — the key thread reads both. Undone in restore().
+        // 0x03 key (no SIGINT) - the key thread reads both. Undone in restore().
         enter_screen();
         TermGuard
     }
@@ -104,7 +104,7 @@ pub fn queue_clipboard(b64: String) {
 
 /// One buffered write per frame. `frame` already contains per-line clear-to-EOL,
 /// line breaks, and a trailing clear-below; we only home the cursor, write the
-/// whole string, and flush — a single syscall's worth of I/O.
+/// whole string, and flush - a single syscall's worth of I/O.
 /// If a clipboard payload is queued, it is emitted once after the frame as an
 /// OSC-52 escape sequence (raw bytes, pass-through by the terminal emulator).
 pub fn paint(frame: &str) {

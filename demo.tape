@@ -21,27 +21,21 @@ Sleep 5s
 Type "6"
 Sleep 2.5s
 
-# --- Speeds tab: navigate rows ---
+# --- Speeds tab: navigate rows with vim keys ---
 Type "4"
-Sleep 1.5s
-Down
+Sleep 1.2s
+Type "j"
 Sleep 0.4s
-Down
+Type "j"
 Sleep 0.4s
-Down
-Sleep 0.4s
-Down
-Sleep 0.4s
-Down
-Sleep 0.4s
-Up
-Sleep 0.4s
-Up
+Type "k"
 Sleep 1s
 
-# --- Dashboard: multi-select ---
+# --- Dashboard: multi-select with Space ---
 Type "1"
-Sleep 1.5s
+Sleep 1.2s
+Type "j"
+Sleep 0.5s
 Space
 Sleep 1s
 
@@ -51,17 +45,23 @@ Sleep 2.5s
 Escape
 Sleep 0.8s
 
-# --- Command palette: open + fuzzy filter ---
+# --- Remove confirmation overlay (then cancel) ---
+Type "x"
+Sleep 2.5s
+Escape
+Sleep 1s
+
+# --- Command palette ---
 Type ":"
-Sleep 1.5s
+Sleep 1.2s
 Type "expo"
 Sleep 2s
 Escape
 Sleep 0.8s
 
-# --- Ratio graph tab ---
+# --- Ratio graph tab (cumulative upload curve) ---
 Type "0"
-Sleep 2.5s
+Sleep 3s
 
 # --- Help overlay ---
 Type "?"

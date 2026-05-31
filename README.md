@@ -131,7 +131,7 @@ chmod +x mirage-linux-x86_64
 ```
 
 On macOS, unzip `Mirage.app.zip` and move `Mirage.app` to `/Applications`. It
-opens the live dashboard in a Terminal.app window sized to 110x34 columns.
+opens the live dashboard in a Terminal.app window sized to 92x28 columns.
 
 ### Build from source
 
@@ -252,7 +252,7 @@ the dashboard feed.
 When stdout is an interactive terminal and `MIRAGE_NO_UI` is not set, Mirage
 enters the alternate screen and displays a full-screen dashboard redrawn
 approximately 2.5 times per second. The dashboard is composed of nine tabs
-navigated by number keys 1-9 or the Left/Right arrow keys.
+navigated by number keys 1-9, the Left/Right arrow keys, or `h`/`l`.
 
 The dashboard captures key input in raw mode. Bracketed paste is disabled so
 pasting text into the window does not trigger accidental commands.
@@ -302,9 +302,10 @@ Navigation:
 
 | Key | Action |
 |-----|--------|
-| 1-9 | Jump to tab |
-| Left, Right | Previous / next tab |
-| Up, Down | Select row on list tabs; walk upload multiplier on other tabs |
+| 1-9, 0 | Jump to tab (0 = ratio graph) |
+| Left, Right or h, l | Previous / next tab |
+| Up, Down or k, j | Select row on list and Speeds tabs |
+| Up, Down | Walk the upload multiplier on non-list tabs |
 | Esc | Back to Dashboard, or close the help overlay |
 | ? | Toggle the help overlay |
 
@@ -313,7 +314,7 @@ Actions:
 | Key | Action |
 |-----|--------|
 | f | Force-announce the selected torrent (resets its countdown) |
-| x | Remove the selected torrent (announces Stopped) |
+| x | Remove the selected/marked torrent(s); asks `y`/`Esc` to confirm (announces Stopped) |
 | p | Toggle global pause (all upload stops) |
 | r | Resume (clear global pause) |
 | + or = | On Speeds tab: double the selected rate; elsewhere: increase multiplier |

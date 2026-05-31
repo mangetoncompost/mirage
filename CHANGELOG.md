@@ -1,6 +1,26 @@
 # Changelog
 
-## v1.1.0 — 2026-05-30
+## v1.2.0 - 2026-05-30
+
+### Added
+
+- `j`/`k` and `h`/`l` as vim-style aliases for row selection and tab navigation, alongside the arrow keys
+- Context-sensitive footer: each tab shows the keys actionable on it, degrading to `? q` on narrow terminals
+- First-run onboarding on the Dashboard: with no torrents, a hint points to the watch directory and the `?`/`:` overlays
+
+### Changed
+
+- Removing torrents (`x`, or the palette remove command) now asks for `y`/`Esc` confirmation before stopping announces and dropping seeding state
+- Keypresses wake the render loop immediately, so action feedback no longer waits up to one redraw tick
+- macOS app window opens at 92x28 (was 110x34)
+
+### Fixed
+
+- Selecting a torrent row no longer shifts its content one column to the right (the selected-row gutter was 3 cells wide instead of 2)
+- Ratio graph (tab 0) now draws the cumulative-upload curve as a filled staircase rising from 0 to the session total, with sub-cell ramp glyphs and start/end time labels; it previously rendered as an unreadable solid block
+- Uploaded totals now climb live between announces (Dashboard, footer, Speeds, ratio graph, detail card) instead of staying flat until the next announce; the value declared to trackers is unchanged
+
+## v1.1.0 - 2026-05-30
 
 ### Added
 
@@ -21,7 +41,7 @@
 - `can_upload()` also checks the per-torrent upload target
 - Schedule tab rewritten as a live next-announce ledger
 
-## v1.0.0 — 2026-05-30
+## v1.0.0 - 2026-05-30
 
 ### Added
 

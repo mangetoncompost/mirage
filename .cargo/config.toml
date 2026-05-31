@@ -1,4 +1,4 @@
 [profile.release]
-strip = true       # strip debug symbols — smaller binaries in releases
-lto = true         # link-time optimisation — better inlining across crates
-codegen-units = 1  # single codegen unit — maximises LTO effectiveness
+strip = true       # strip debug symbols - smaller binaries in releases
+lto = true         # link-time optimisation - better inlining across crates
+codegen-units = 1  # single codegen unit - maximises LTO effectiveness

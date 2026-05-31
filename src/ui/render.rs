@@ -156,7 +156,7 @@ fn clamp_visible(s: &str, max: usize, color: bool) -> (String, usize) {
 
 /// Truncate `s` to at most `max` display *cells* (not chars), appending a
 /// 1-cell ellipsis if cut. Cell-aware so wide glyphs (emoji/CJK) never push the
-/// result past `max` — callers rely on `dwidth(truncate(..)) <= max` to keep
+/// result past `max` - callers rely on `dwidth(truncate(..)) <= max` to keep
 /// column widths exact.
 fn truncate(s: &str, max: usize, utf8: bool) -> String {
     if dwidth(s) <= max {
@@ -254,7 +254,7 @@ pub fn build_frame(
     let c = Caps::detect();
     let b = box_set(c.utf8);
 
-    // Too-small terminal: don't run the layout math on a degenerate size — show
+    // Too-small terminal: don't run the layout math on a degenerate size - show
     // a single centered hint instead of a broken, clipped box.
     if (width as usize) < 40 || f.term_h < 8 {
         let msg = "terminal too small (need 40x8)";
@@ -306,7 +306,7 @@ pub fn build_frame(
     // carries its own ANSI; we measure its *visible* width ourselves (skipping
     // escapes, counting wide glyphs as 2) so the right border always lands at
     // column `w` no matter how the content was built. The `vis` argument is
-    // ignored except as a hint — measuring is authoritative.
+    // ignored except as a hint - measuring is authoritative.
     let line = |out: &mut String, content: &str, _vis: usize| {
         let avail = inner.saturating_sub(2); // leading + trailing space
         let (clamped, vis) = clamp_visible(content, avail, c.color);
@@ -368,7 +368,7 @@ pub fn build_frame(
     }
 
     // ---- tab strip ----------------------------------------------------------
-    // "[1]dash [2]tor … [9]cfg [0]rto" — active label in header color, rest dim.
+    // "[1]dash [2]tor … [9]cfg [0]rto" - active label in header color, rest dim.
     // Tab 10 (index 9) uses key "0" not "10" so it stays a single digit. On a
     // narrow terminal fall back to bare digits "[1][2]…[0]".
     {
@@ -432,6 +432,7 @@ pub fn build_frame(
         Overlay::Help => build_help(&mut out, &c, inner, f.term_h, &line),
         Overlay::Palette => build_palette(&mut out, &c, inner, f.term_h, &line),
         Overlay::Detail => build_detail(&mut out, f, &c, &b, inner, &line, &rule),
+        Overlay::ConfirmRemove => build_confirm_remove(&mut out, f, &c, &b, inner, &line, &rule),
         Overlay::None => match view {
             View::Dashboard => build_dash(&mut out, f, &c, &b, inner, sel, &line, &rule),
             View::Torrents => build_tor(&mut out, f, &c, &b, inner, sel, &line, &rule),
@@ -510,7 +511,7 @@ pub fn build_frame(
         );
         // Right-aligned hint. When celebrating a ratio milestone (F1.3) the
         // hint is replaced by a festive label; the spinner's parity provides the
-        // blink — `build_frame` stays deterministic for a given Frame snapshot.
+        // blink - `build_frame` stays deterministic for a given Frame snapshot.
         let (hint, hint_vis): (String, usize) = if f.celebrate && f.spinner.is_multiple_of(2) {
             let lbl = format!("★ {} ★", f.celebrate_label);
             let vis = dwidth(&lbl);
@@ -531,15 +532,11 @@ pub fn build_frame(
                 vis = avail;
             }
         } else {
-            // Static hint: try progressively shorter versions so at least "? q"
-            // stays visible instead of being suppressed entirely at narrow widths.
-            let fallbacks: &[(&str, bool)] = &[
-                ("←→ tabs · : cmds · ? help · q quit", false),
-                (": cmds · ? help · q quit", false),
-                ("? help · q quit", false),
-                ("? q", false),
-            ];
-            for &(candidate, _) in fallbacks {
+            // Static hint: a context-sensitive ladder that surfaces the keys
+            // actionable on the CURRENT tab first, then degrades to the global
+            // navigation/quit hint as width shrinks, so at least "? q" survives.
+            let fallbacks = footer_hints(view, overlay);
+            for &candidate in fallbacks {
                 let cv = dwidth(candidate);
                 if used + 3 + cv <= avail {
                     let gap = avail - used - cv;
@@ -559,7 +556,7 @@ pub fn build_frame(
     // border, so clearing-below doesn't touch the last row we draw.
     out.push_str(CLR_BELOW);
 
-    // bottom border — the LAST row of the frame. No trailing newline: that would
+    // bottom border - the LAST row of the frame. No trailing newline: that would
     // push the cursor onto a row below the box, leaving a blank line (with the
     // cursor) under the footer. Keeping the cursor on the bottom border makes
     // the box occupy exactly `term_h` rows.
@@ -648,6 +645,48 @@ fn build_dash(
 
     // separator
     rule_line(out, c, b, rule, None);
+
+    // ---- first-run / empty state -------------------------------------------
+    // Zero torrents is the exact state a new user lands on. Show a short
+    // onboarding hint instead of a bare table header + empty feed, so the
+    // default tab tells the user what to do next.
+    if f.rows.is_empty() {
+        let dir = crate::CONFIG.load().torrent_dir.display().to_string();
+        let dir = truncate(&dir, inner.saturating_sub(28), c.utf8);
+        line(out, "", 0);
+        line(
+            out,
+            &format!(
+                "{cy}{bold} No torrents yet.{r}",
+                cy = c_header(c),
+                bold = BOLD_if(c.color),
+                r = c.reset()
+            ),
+            dwidth(" No torrents yet."),
+        );
+        line(
+            out,
+            &format!(
+                "{d} Drop a .torrent into {r}{cy}{dir}{r}{d} to start.{r}",
+                d = c_dim(c),
+                cy = c_header(c),
+                r = c.reset(),
+                dir = dir,
+            ),
+            dwidth(" Drop a .torrent into ") + dwidth(&dir) + dwidth(" to start."),
+        );
+        line(
+            out,
+            &format!(
+                "{d} Press {r}{cy}?{r}{d} for keys, {r}{cy}:{r}{d} for commands.{r}",
+                d = c_dim(c),
+                cy = c_header(c),
+                r = c.reset(),
+            ),
+            dwidth(" Press ? for keys, : for commands."),
+        );
+        return;
+    }
 
     // ---- torrent table ------------------------------------------------------
     // Header carries the same 2-cell selection gutter as the rows (drawn by
@@ -741,11 +780,16 @@ fn build_help(out: &mut String, c: &Caps, inner: usize, term_h: usize, line: &Li
     line_s(&mut scratch, "", 0);
     head(&mut scratch, "navigation");
     row(&mut scratch, "1-9 / 0", "jump to tab (0 = ratio graph)");
-    row(&mut scratch, "← →", "previous / next tab");
+    row(&mut scratch, "← → / h l", "previous / next tab");
+    row(
+        &mut scratch,
+        "↑ ↓ / k j",
+        "[list] select row · [spd] select setting",
+    );
     row(
         &mut scratch,
         "↑ ↓",
-        "select row (or upload multiplier off the lists)",
+        "upload multiplier (on non-list tabs only)",
     );
     row(
         &mut scratch,
@@ -761,7 +805,7 @@ fn build_help(out: &mut String, c: &Caps, inner: usize, term_h: usize, line: &Li
     row(
         &mut scratch,
         "x",
-        "remove selected (or all marked, announces stopped)",
+        "remove selected/marked (asks y/Esc to confirm)",
     );
     row(
         &mut scratch,
@@ -800,7 +844,7 @@ fn build_help(out: &mut String, c: &Caps, inner: usize, term_h: usize, line: &Li
         "quit (announces stopped, saves state)",
     );
 
-    // Clip to fit: header uses 3 rows, footer uses 3 rows — body budget is the rest.
+    // Clip to fit: header uses 3 rows, footer uses 3 rows - body budget is the rest.
     let budget = term_h.saturating_sub(6);
     for segment in scratch.split_inclusive("\r\n").take(budget) {
         out.push_str(segment);
@@ -833,7 +877,7 @@ fn emit_row(
             ok = c_ok(c),
             r = c.reset(),
         ),
-        (true, false) => format!("{}{}  {}", c_header(c), caret, c.reset()),
+        (true, false) => format!("{}{} {}", c_header(c), caret, c.reset()),
         (false, true) => format!(" {ok}{mark_char}{r}", ok = c_ok(c), r = c.reset()),
         (false, false) => " ".repeat(SEL_GUTTER),
     };
@@ -1184,7 +1228,7 @@ fn build_sch(
 ) {
     use crate::torrent::ScheduleReason;
 
-    // Global pause state stays at the top — it gates the whole schedule.
+    // Global pause state stays at the top - it gates the whole schedule.
     let paused = crate::control::is_paused();
     let state = if paused {
         format!("{rd}[ ] paused{r}", rd = c_err(c), r = c.reset())
@@ -1208,17 +1252,17 @@ fn build_sch(
         line(
             out,
             &format!(
-                "{d} (no torrents — add a .torrent to the watch dir){r}",
+                "{d} (no torrents - add a .torrent to the watch dir){r}",
                 d = c_dim(c),
                 r = c.reset()
             ),
-            dwidth(" (no torrents — add a .torrent to the watch dir)"),
+            dwidth(" (no torrents - add a .torrent to the watch dir)"),
         );
         return;
     }
 
     // Order by time-to-announce so the next firing is always on top. Skip the
-    // busy (mid-announce) placeholder rows — their fields are zeroed sentinels.
+    // busy (mid-announce) placeholder rows - their fields are zeroed sentinels.
     let mut order: Vec<&TorrentView> = f.rows.iter().filter(|t| !t.busy).collect();
     order.sort_by_key(|t| t.secs_to_announce);
 
@@ -1316,11 +1360,11 @@ fn build_log(out: &mut String, f: &Frame, c: &Caps, inner: usize, line: &Line) {
         line(
             out,
             &format!(
-                "{d} (no events yet — they appear here as the engine runs){r}",
+                "{d} (no events yet - they appear here as the engine runs){r}",
                 d = c_dim(c),
                 r = c.reset()
             ),
-            dwidth(" (no events yet — they appear here as the engine runs)"),
+            dwidth(" (no events yet - they appear here as the engine runs)"),
         );
     }
     for ev in f.feed.iter() {
@@ -1399,7 +1443,7 @@ fn dot_span(tv: &TorrentView, c: &Caps) -> String {
     }
 }
 
-/// Width of one torrent row's body — the bordered area (`inner-2`) minus the
+/// Width of one torrent row's body - the bordered area (`inner-2`) minus the
 /// 2-cell selection gutter. Header and rows both size against this so columns
 /// line up exactly under the header.
 fn table_body_w(inner: usize) -> usize {
@@ -1536,10 +1580,92 @@ fn render_event_row(ev: &UiEvent, c: &Caps, inner: usize) -> (String, usize) {
 
 // --- small layout helpers ----------------------------------------------------
 
+/// Context-sensitive footer hint ladder for the current view/overlay, widest
+/// first. The footer picks the first entry that fits the remaining width, so the
+/// per-tab actions show on wide terminals and degrade to the global nav/quit
+/// hint (and finally "? q") when space runs out. Keeping the same tail on every
+/// ladder means the universal keys (`:` `?` `q`) never disappear before the
+/// tab-specific ones.
+fn footer_hints(view: View, overlay: crate::ui::overlay::Overlay) -> &'static [&'static str] {
+    use crate::ui::overlay::Overlay;
+    // Overlays own the screen, so hint at how to leave / drive them.
+    match overlay {
+        Overlay::Help => {
+            return &["? / Esc close", "Esc close"];
+        }
+        Overlay::Palette => {
+            return &["↑↓ move · ⏎ run · Esc close", "⏎ run · Esc", "Esc"];
+        }
+        Overlay::Detail => {
+            return &["i info · w wire · Esc close", "Esc close", "Esc"];
+        }
+        Overlay::ConfirmRemove => {
+            return &["y confirm · Esc cancel", "y / Esc"];
+        }
+        Overlay::None => {}
+    }
+    match view {
+        View::Dashboard | View::Torrents | View::Trackers => &[
+            "↑↓ select · ⏎ detail · space mark · f force · x remove · : cmds · ? help · q quit",
+            "↑↓ select · ⏎ detail · f force · x remove · : cmds · ? help",
+            "↑↓ select · f force · x remove · : cmds · ? help",
+            "↑↓ · f · x · : cmds · ? help · q quit",
+            ": cmds · ? help · q quit",
+            "? help · q quit",
+            "? q",
+        ],
+        View::Speeds => &[
+            "↑↓ row · +/- edit · : cmds · ? help · q quit",
+            "↑↓ · +/- edit · : cmds · ? help",
+            ": cmds · ? help · q quit",
+            "? help · q quit",
+            "? q",
+        ],
+        View::Client => &[
+            "k re-init client · : cmds · ? help · q quit",
+            "k re-init · : cmds · ? help",
+            ": cmds · ? help · q quit",
+            "? help · q quit",
+            "? q",
+        ],
+        View::Config => &[
+            "s save config · : cmds · ? help · q quit",
+            "s save · : cmds · ? help",
+            ": cmds · ? help · q quit",
+            "? help · q quit",
+            "? q",
+        ],
+        View::Schedule => &[
+            "p pause/resume · : cmds · ? help · q quit",
+            "p pause · : cmds · ? help",
+            ": cmds · ? help · q quit",
+            "? help · q quit",
+            "? q",
+        ],
+        View::Network | View::Logs | View::Ratio => &[
+            "←→ tabs · : cmds · ? help · q quit",
+            ": cmds · ? help · q quit",
+            "? help · q quit",
+            "? q",
+        ],
+    }
+}
+
 /// Width of the progress bar column (between brackets), scaled to terminal.
 fn bar_width(inner: usize) -> usize {
     // bar grows with width but stays reasonable
     (inner / 6).clamp(6, 18)
+}
+
+/// Height of one ratio-graph column in eighths-of-a-cell: `value/max` scaled to
+/// `body_h` rows, each row split into 8 sub-cell steps. Saturating at the top so
+/// a value == max fills exactly `body_h*8`. Returns 0 when `max` is 0.
+fn graph_eighths(value: u64, max: u64, body_h: usize) -> u64 {
+    if max == 0 {
+        return 0;
+    }
+    let full = body_h as u128 * 8;
+    ((value as u128 * full) / max as u128).min(full) as u64
 }
 
 /// Width of the torrent-name column given the fixed numeric columns + bar.
@@ -1578,7 +1704,7 @@ fn progress_bar(done: u64, total: u64, w: usize, c: &Caps) -> String {
 
 /// A bracketed speed meter: like [`progress_bar`] but the fill is `val / max`
 /// (a torrent's upload speed against the session-peak summed speed) and the
-/// filled glyphs are colored by how hot the row is — green when it's carrying a
+/// filled glyphs are colored by how hot the row is - green when it's carrying a
 /// healthy share of the upload, amber in the mid-band, dim when nearly idle.
 /// More upload is *good* for a ratio tool, so a fuller bar is greener, never red.
 fn meter_bar(val: u64, max: u64, w: usize, c: &Caps) -> String {
@@ -1674,7 +1800,7 @@ const PALETTE_CMDS: &[(&str, &str, &str)] = &[
 ];
 
 /// How many palette items match the current query (for key-thread navigation).
-/// Called from the key thread — reads a Mutex once, acceptable.
+/// Called from the key thread - reads a Mutex once, acceptable.
 pub fn palette_match_count() -> usize {
     let q = crate::ui::overlay::palette_query();
     if q.is_empty() {
@@ -1712,8 +1838,10 @@ pub fn execute_palette_item(idx: usize, selected_hash: Option<[u8; 20]>) {
             }
         }
         1 => {
+            // Route remove through the confirmation overlay, same as the `x`
+            // key, so the palette path is gated identically.
             if let Some(h) = selected_hash {
-                control::send(Cmd::Remove(h));
+                crate::ui::overlay::open_confirm_remove(vec![h]);
             }
         }
         2 => {
@@ -1865,9 +1993,9 @@ fn build_detail(
         None => {
             // Distinguish: no hash stored vs hash present but torrent is busy/removed.
             let msg = if hash.is_some() {
-                " torrent announcing — detail will reappear momentarily"
+                " torrent announcing - detail will reappear momentarily"
             } else {
-                " (no torrent selected — press Enter on a row)"
+                " (no torrent selected - press Enter on a row)"
             };
             line(
                 out,
@@ -1940,7 +2068,7 @@ fn build_detail(
                     }
                 }
                 _ => {
-                    // Wire sub-view — full implementation in F3.2 (needs per-torrent
+                    // Wire sub-view - full implementation in F3.2 (needs per-torrent
                     // last-request/response capture in the announcer).
                     line(
                         out,
@@ -1953,7 +2081,7 @@ fn build_detail(
                     );
                 }
             }
-            // Navigation hint — always visible at the bottom of the card.
+            // Navigation hint - always visible at the bottom of the card.
             line(
                 out,
                 &format!(
@@ -1967,6 +2095,93 @@ fn build_detail(
     }
 }
 
+// ---- [confirm] destructive-remove guard overlay -----------------------------
+// Names the torrents about to be removed and waits for an explicit y/Enter.
+// Targets were captured when `x` was pressed (overlay::open_confirm_remove), so
+// a list change between prompt and confirm cannot retarget the action.
+fn build_confirm_remove(
+    out: &mut String,
+    f: &Frame,
+    c: &Caps,
+    b: &Box,
+    inner: usize,
+    line: &Line,
+    rule: &Rule,
+) {
+    let targets = crate::ui::overlay::confirm_targets();
+    let n = targets.len();
+    rule_line(out, c, b, rule, Some("confirm remove"));
+    line(out, "", 0);
+    let head = format!(
+        "{rd}{bold} Remove {n} torrent{plural}?{r}",
+        rd = c_err(c),
+        bold = BOLD_if(c.color),
+        n = n,
+        plural = if n == 1 { "" } else { "s" },
+        r = c.reset(),
+    );
+    line(
+        out,
+        &head,
+        dwidth(&format!(
+            " Remove {n} torrent{}?",
+            if n == 1 { "" } else { "s" }
+        )),
+    );
+    line(
+        out,
+        &format!(
+            "{d} Announces stop and the seeding state is dropped. This cannot be undone.{r}",
+            d = c_dim(c),
+            r = c.reset()
+        ),
+        dwidth(" Announces stop and the seeding state is dropped. This cannot be undone."),
+    );
+    line(out, "", 0);
+
+    // Name the affected torrents (capped), resolving each hash against the frame.
+    let shown = n.min(MAX_VISIBLE_ROWS);
+    for h in targets.iter().take(shown) {
+        let name = f
+            .rows
+            .iter()
+            .find(|r| r.info_hash == *h)
+            .map(|r| r.name.as_str())
+            .unwrap_or("(removed)");
+        let name = truncate(name, inner.saturating_sub(6), c.utf8);
+        line(
+            out,
+            &format!(
+                "{d}   • {r}{name}",
+                d = c_dim(c),
+                r = c.reset(),
+                name = name
+            ),
+            4 + dwidth(&name),
+        );
+    }
+    if n > shown {
+        let extra = n - shown;
+        line(
+            out,
+            &format!("{d}   (+{extra} more)…{r}", d = c_dim(c), r = c.reset()),
+            dwidth(&format!("   (+{extra} more)…")),
+        );
+    }
+    line(out, "", 0);
+    line(
+        out,
+        &format!(
+            "{ok} y{r}{d} / Enter confirm   {r}{cy}Esc{r}{d} / n cancel{r}",
+            ok = c_ok(c),
+            cy = c_header(c),
+            d = c_dim(c),
+            r = c.reset(),
+        ),
+        dwidth(" y / Enter confirm   Esc / n cancel"),
+    );
+}
+
 // ---- [0/rto] ratio: cumulative upload graph (F1.1) --------------------------
 fn build_ratio(out: &mut String, f: &Frame, c: &Caps, inner: usize, line: &Line) {
     let uptime = (f.now - f.started).num_seconds().max(0) as u64;
@@ -1976,11 +2191,11 @@ fn build_ratio(out: &mut String, f: &Frame, c: &Caps, inner: usize, line: &Line)
         line(
             out,
             &format!(
-                "{d} (no history yet — accumulates after the first tick){r}",
+                "{d} (no history yet - accumulates after the first tick){r}",
                 d = c_dim(c),
                 r = c.reset()
             ),
-            dwidth(" (no history yet — accumulates after the first tick)"),
+            dwidth(" (no history yet - accumulates after the first tick)"),
         );
         return;
     }
@@ -1998,32 +2213,53 @@ fn build_ratio(out: &mut String, f: &Frame, c: &Caps, inner: usize, line: &Line)
         line(
             out,
             &format!(
-                "{d} (no upload yet — graph fills as the session progresses){r}",
+                "{d} (no upload yet - graph fills as the session progresses){r}",
                 d = c_dim(c),
                 r = c.reset()
             ),
-            dwidth(" (no upload yet — graph fills as the session progresses)"),
+            dwidth(" (no upload yet - graph fills as the session progresses)"),
         );
         return;
     }
     let max_up = max_up_raw;
-    let span_secs = uptime.max(1);
+    // X axis spans the REAL recorded window [first_secs, last_secs], not [0, now].
+    // Anchoring on the first sample avoids a flat dead band on the left before any
+    // data existed, which is what made the old chart read as a half-empty block.
+    let first_secs = f.up_history.first().map(|(s, _)| *s).unwrap_or(0);
+    let last_secs = f.up_history.last().map(|(s, _)| *s).unwrap_or(first_secs);
+    let span_secs = (last_secs - first_secs).max(1) as u64;
 
-    // Raster: for each column pick the sample closest to that time offset.
+    // Each column = the latest cumulative value at-or-before that column's time
+    // offset (a step/sample-and-hold), so the curve is monotone non-decreasing
+    // and never dips to 0 between sparse samples the way nearest-sample did.
     let cols: Vec<u64> = (0..graph_w)
         .map(|col| {
-            let target_secs = (col as u64 * span_secs) / graph_w as u64;
+            let target = first_secs as u64 + (col as u64 * span_secs) / graph_w.max(1) as u64;
             f.up_history
                 .iter()
-                .min_by_key(|(s, _)| (*s as u64).abs_diff(target_secs))
+                .rfind(|(s, _)| (*s as u64) <= target)
+                .or_else(|| f.up_history.first())
                 .map(|(_, v)| *v)
                 .unwrap_or(0)
         })
         .collect();
 
-    // Draw graph top-to-bottom.
+    // Sub-cell glyph ramp: each column's height is value/max scaled to body_h in
+    // EIGHTHS, so the top cell of the curve shows a partial block (▁▂▃▄▅▆▇█)
+    // instead of an all-or-nothing step. Fill below the top cell is solid.
+    let ramp = if c.utf8 {
+        ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']
+    } else {
+        ['.', '.', ':', ':', '|', '|', '#', '#']
+    };
+    let eighths: Vec<u64> = cols
+        .iter()
+        .map(|&v| graph_eighths(v, max_up, body_h))
+        .collect();
+
+    // Draw graph top-to-bottom. Row r (0 = bottom) is "lit" for a column when the
+    // column's height reaches into that row.
     for row in (0..body_h).rev() {
-        let threshold = (max_up * (row as u64 + 1)) / body_h as u64;
         let y_label = if row == body_h - 1 {
             crate::utils::format_bytes_u64(max_up)
         } else if row == 0 {
@@ -2039,21 +2275,30 @@ fn build_ratio(out: &mut String, f: &Frame, c: &Caps, inner: usize, line: &Line)
             r = c.reset(),
             label_w = label_w
         ));
-        for &v in &cols {
-            let (glyph, col) = if v >= threshold {
-                (if c.utf8 { "▆" } else { "#" }, c_ok(c))
+        let row_base = row as u64 * 8; // eighths at the bottom of this cell
+        for &h in &eighths {
+            if h >= row_base + 8 {
+                // fully filled cell
+                graph_row.push_str(&c_ok(c));
+                graph_row.push(ramp[7]);
+                graph_row.push_str(c.reset());
+            } else if h > row_base {
+                // partial top cell: 1..=7 eighths
+                let frac = (h - row_base) as usize; // 1..=7
+                graph_row.push_str(&c_ok(c));
+                graph_row.push(ramp[frac - 1]);
+                graph_row.push_str(c.reset());
             } else {
-                (" ", c_dim(c))
-            };
-            graph_row.push_str(&col);
-            graph_row.push_str(glyph);
-            graph_row.push_str(c.reset());
+                graph_row.push_str(&c_dim(c));
+                graph_row.push(' ');
+                graph_row.push_str(c.reset());
+            }
         }
         let vis = label_w + 1 + graph_w;
         line(out, &graph_row, vis);
     }
 
-    // X axis.
+    // X axis with start/end time labels under the corners.
     let axis = {
         let mut s = format!("{d}{:>label_w$} ", "", d = c_dim(c), label_w = label_w);
         for _ in 0..graph_w {
@@ -2063,6 +2308,21 @@ fn build_ratio(out: &mut String, f: &Frame, c: &Caps, inner: usize, line: &Line)
         s
     };
     line(out, &axis, label_w + 1 + graph_w);
+    {
+        let left = "0s";
+        let right = fmt_hms(uptime);
+        let gap = graph_w.saturating_sub(dwidth(left) + dwidth(&right));
+        let xlabels = format!(
+            "{pad}{d}{left}{sp}{right}{r}",
+            pad = " ".repeat(label_w + 1),
+            d = c_dim(c),
+            left = left,
+            sp = " ".repeat(gap),
+            right = right,
+            r = c.reset(),
+        );
+        line(out, &xlabels, label_w + 1 + graph_w);
+    }
 
     // Summary footer.
     let peak_speed = crate::ui::history::session_peak();
@@ -2141,7 +2401,7 @@ mod tests {
     #[test]
     fn meter_bar_fill_scales_and_clamps() {
         // Color off + ASCII so the body is plain '#' (full) / '-' (empty)
-        // between '[' and ']' — easy to count without parsing ANSI.
+        // between '[' and ']' - easy to count without parsing ANSI.
         let c = Caps {
             color: false,
             truecolor: false,
@@ -2161,5 +2421,28 @@ mod tests {
         // max==0 (no peak yet) must not divide-by-zero; treated as empty.
         let bar = meter_bar(5, 0, 10, &c);
         assert_eq!(bar.chars().count(), 12);
+    }
+
+    #[test]
+    fn graph_eighths_scales_and_saturates() {
+        // body_h = 10 rows => 80 eighths full scale.
+        assert_eq!(graph_eighths(0, 100, 10), 0); // empty
+        assert_eq!(graph_eighths(50, 100, 10), 40); // half => 40/80
+        assert_eq!(graph_eighths(100, 100, 10), 80); // full
+        // Over-max saturates, never exceeds body_h*8 (no overflow into a phantom row).
+        assert_eq!(graph_eighths(200, 100, 10), 80);
+        // max == 0 must not divide by zero.
+        assert_eq!(graph_eighths(5, 0, 10), 0);
+        // A monotone-increasing cumulative series yields non-decreasing heights -
+        // this is the property that makes the curve a staircase, not a solid block.
+        let max = 1000u64;
+        let series = [0u64, 100, 100, 250, 600, 1000];
+        let heights: Vec<u64> = series.iter().map(|&v| graph_eighths(v, max, 8)).collect();
+        assert!(
+            heights.windows(2).all(|w| w[0] <= w[1]),
+            "must be monotone: {heights:?}"
+        );
+        assert_eq!(*heights.first().unwrap(), 0);
+        assert_eq!(*heights.last().unwrap(), 64); // 8 rows * 8 == full
     }
 }

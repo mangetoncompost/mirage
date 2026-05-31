@@ -4,8 +4,8 @@
 //! client/peer/key/uptime, one row per torrent with seeders/leechers/upload
 //! speed/total/countdown bar, a scrolling recent-events feed, and a totals
 //! footer), redrawn ~2.5×/s independently of the (possibly half-hourly)
-//! announce schedule. When stdout is piped/redirected — or `MIRAGE_NO_UI` is
-//! set — we fall back to the existing `tracing` logs unchanged.
+//! announce schedule. When stdout is piped/redirected - or `MIRAGE_NO_UI` is
+//! set - we fall back to the existing `tracing` logs unchanged.
 
 pub mod draw;
 mod events;
@@ -23,6 +23,21 @@ use std::time::Duration;
 
 use snapshot::{Frame, snapshot_client, snapshot_torrents};
 
+/// Wake signal from the key thread to the render loop. The render loop ticks at
+/// ~400ms; without this, every keypress (tab switch, selection, action) would
+/// wait up to a full tick before its effect appears. The key thread calls
+/// [`request_redraw`] after each handled key; the loop's `select!` awaits it and
+/// repaints immediately. A `Notify` coalesces: many keys before the next poll
+/// collapse into one wakeup, so a key storm never queues redundant frames.
+static REDRAW: once_cell::sync::Lazy<tokio::sync::Notify> =
+    once_cell::sync::Lazy::new(tokio::sync::Notify::new);
+
+/// Ask the render loop to repaint now (called from the key thread). Cheap and
+/// lock-free; safe to call from the non-async key thread.
+pub fn request_redraw() {
+    REDRAW.notify_one();
+}
+
 /// Use the live dashboard only on an interactive stdout, unless opted out via
 /// `MIRAGE_NO_UI` (which forces classic log mode even on a TTY).
 pub fn should_use_tui() -> bool {
@@ -33,7 +48,7 @@ pub fn should_use_tui() -> bool {
 }
 
 /// Install a panic hook that restores the terminal before the default hook
-/// prints the panic message — so a render-task (or any) panic never strands the
+/// prints the panic message - so a render-task (or any) panic never strands the
 /// user in the alternate screen with a hidden cursor. MUST be called BEFORE
 /// `draw::TermGuard::enter()`.
 pub fn install_panic_hook() {
@@ -80,7 +95,7 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
 
         // Time-series sample for the history widgets: summed upload + summed
         // instantaneous speed across the (already-snapshotted) rows. Pushed once
-        // per tick under the lock-light history ring — same discipline as
+        // per tick under the lock-light history ring - same discipline as
         // set_rows above, and never touched from build_frame or the key thread.
         let total_up: u64 = rows.iter().map(|r| r.uploaded).sum();
         let row_peak: u64 = rows.iter().map(|r| r.up_speed as u64).max().unwrap_or(0);
@@ -88,11 +103,11 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
         history::push_sample(secs, total_up, row_peak);
 
         // Resolve the active overlay (Help / Palette / Detail / None) here so
-        // build_frame stays pure — it never reads the overlay atomics itself.
+        // build_frame stays pure - it never reads the overlay atomics itself.
         let active_overlay = overlay::active();
 
         // Milestone celebration (F1.3): ratio = total_up / total_seeding_length.
-        // Only seeding torrents contribute to the denominator — downloading ones
+        // Only seeding torrents contribute to the denominator - downloading ones
         // haven't finished yet and their partial length would deflate the ratio.
         let total_seeding_len: u64 = rows
             .iter()
@@ -161,6 +176,10 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
                     render_once(spinner).await;
                 }
             }
+            // Keypress wake: repaint at once so action feedback is immediate
+            // instead of waiting up to one ~400ms tick. The spinner is not
+            // advanced here so its cadence stays time-based, not key-based.
+            _ = REDRAW.notified() => { render_once(spinner).await; }
         }
         #[cfg(not(unix))]
         tokio::select! {
@@ -170,6 +189,7 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
                 render_once(spinner).await;
                 spinner = spinner.wrapping_add(1);
             }
+            _ = REDRAW.notified() => { render_once(spinner).await; }
         }
     }
     draw::restore();

@@ -1,7 +1,7 @@
 //! Runtime control layer between the async engine and the dashboard UI.
 //!
 //! The native window is a real embedded terminal running the dashboard in a PTY
-//! child, so there is no in-process GUI snapshot to publish — the TTY renderer
+//! child, so there is no in-process GUI snapshot to publish - the TTY renderer
 //! reads engine state directly (see `ui::snapshot`). What remains here is the
 //! lock-free global pause flag (checked in `Torrent::can_upload`) and the
 //! command channel the dashboard's keys use to mutate the running engine.
@@ -62,7 +62,7 @@ pub enum Cmd {
     #[allow(dead_code)]
     ExportSnapshot,
     /// Set (or clear, with `None`) a per-torrent uploaded-bytes goal. Once
-    /// `uploaded` reaches the target the torrent stops declaring upload — a
+    /// `uploaded` reaches the target the torrent stops declaring upload - a
     /// hard ratio cap the tracker never sees exceeded.
     #[allow(dead_code)]
     SetRatioTarget([u8; 20], Option<u64>),
