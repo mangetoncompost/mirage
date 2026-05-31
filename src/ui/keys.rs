@@ -25,17 +25,30 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                     Ok(false) => continue,
                     Err(_) => break, // stdin closed / terminal gone
                 }
-                let Ok(Event::Key(KeyEvent {
+                // This thread owns the only event::read(), so it must also handle
+                // resize. Windows has no SIGWINCH (the render loop's unix repaint
+                // path), so a dropped Resize event would leave the box at the old
+                // size until the next tick. Wake a repaint on resize; ignore other
+                // non-key events.
+                let ev = match event::read() {
+                    Ok(Event::Key(k)) => k,
+                    Ok(Event::Resize(_, _)) => {
+                        crate::ui::request_redraw();
+                        continue;
+                    }
+                    _ => continue,
+                };
+                let KeyEvent {
                     code,
                     modifiers,
                     kind,
                     ..
-                })) = event::read()
-                else {
-                    continue;
-                };
-                // Release events only occur with keyboard-enhancement flags,
-                // which we never enable; ignore for safety / Windows parity.
+                } = ev;
+                // crossterm reports both keydown AND keyup on Windows (ReadConsoleInput
+                // yields paired records); on unix Release only appears with keyboard
+                // enhancement flags, which we never enable. Dropping Release events
+                // unconditionally keeps a single physical keypress acted on once on
+                // every platform.
                 if kind == KeyEventKind::Release {
                     continue;
                 }

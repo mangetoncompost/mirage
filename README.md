@@ -112,7 +112,7 @@ and the process exits.
 
 ### Download a pre-built binary
 
-Pre-compiled binaries for Linux and macOS are available on the
+Pre-compiled binaries for Linux, macOS, and Windows are available on the
 [releases page](https://github.com/mangetoncompost/mirage/releases/latest).
 
 | File | Platform |
@@ -122,6 +122,13 @@ Pre-compiled binaries for Linux and macOS are available on the
 | `mirage-macos-x86_64` | macOS Intel |
 | `mirage-windows-x86_64.exe` | Windows x86_64 |
 | `Mirage.app.zip` | macOS app bundle (double-click to launch) |
+
+> Windows note: the Windows binary builds in CI and the code is written to be
+> cross-platform (UTF-8 console code page, truecolor detection for Windows
+> Terminal and VS Code, window-resize handling). It has not been verified at
+> runtime on a real Windows machine. Development and testing happen on macOS and
+> Linux. Run a UTF-8 capable terminal (Windows Terminal or the VS Code terminal)
+> for the intended box-drawing and colors. Reports of Windows issues are welcome.
 
 On Linux and macOS, make the binary executable after downloading:
 

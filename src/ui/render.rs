@@ -28,16 +28,38 @@ struct Caps {
 impl Caps {
     fn detect() -> Self {
         let color = std::env::var_os("NO_COLOR").is_none();
-        let truecolor = std::env::var("COLORTERM")
+
+        // Truecolor: COLORTERM is the cross-platform signal. On Windows it is
+        // normally unset even on terminals that pass 24-bit color through ConPTY,
+        // so also accept Windows Terminal (WT_SESSION) and VS Code / WezTerm
+        // (TERM_PROGRAM). These are env-only, so no OS API is needed here.
+        let colorterm_truecolor = std::env::var("COLORTERM")
             .map(|v| v == "truecolor" || v == "24bit")
             .unwrap_or(false);
-        let utf8 = std::env::var("LC_ALL")
+        let term_program_truecolor = matches!(
+            std::env::var("TERM_PROGRAM").as_deref(),
+            Ok("vscode") | Ok("WezTerm") | Ok("iTerm.app")
+        );
+        let truecolor = colorterm_truecolor
+            || term_program_truecolor
+            || std::env::var_os("WT_SESSION").is_some();
+
+        // UTF-8: LC_ALL/LANG is the POSIX signal. On Windows those are normally
+        // unset, so the env check alone made every UTF-8-capable Windows terminal
+        // (Windows Terminal, modern conhost, VS Code) fall back to ASCII. Query
+        // the active console output code page and treat 65001 (UTF-8) as capable,
+        // OR-ed with the env check so an explicit LANG still wins. The code page
+        // is also forced to 65001 at startup (see draw::enter_screen), so this is
+        // true in practice on a real Windows console.
+        let lang_utf8 = std::env::var("LC_ALL")
             .or_else(|_| std::env::var("LANG"))
             .map(|v| {
                 let up = v.to_uppercase();
                 up.contains("UTF-8") || up.contains("UTF8")
             })
             .unwrap_or(false);
+        let utf8 = lang_utf8 || windows_console_is_utf8();
+
         Caps {
             color,
             truecolor,
@@ -60,6 +82,28 @@ impl Caps {
     fn reset(&self) -> &'static str {
         if self.color { RESET } else { "" }
     }
+}
+
+/// True when the Windows console output code page is UTF-8 (65001). Windows
+/// terminals rarely set LC_ALL/LANG, so without this the env-only check made
+/// every Unicode-capable Windows console (Windows Terminal, modern conhost,
+/// VS Code) fall back to ASCII box-drawing. `draw::enter_screen` forces the code
+/// page to 65001 at startup, so this is normally true on a real Windows console.
+/// Always false on non-Windows (the LC_ALL/LANG path governs there).
+#[cfg(windows)]
+fn windows_console_is_utf8() -> bool {
+    // GetConsoleOutputCP is a Win32 console API; declare it directly to avoid a
+    // new crate (project rule: zero new crates).
+    unsafe extern "system" {
+        fn GetConsoleOutputCP() -> u32;
+    }
+    const CP_UTF8: u32 = 65001;
+    unsafe { GetConsoleOutputCP() == CP_UTF8 }
+}
+
+#[cfg(not(windows))]
+fn windows_console_is_utf8() -> bool {
+    false
 }
 
 // palette helpers -------------------------------------------------------------

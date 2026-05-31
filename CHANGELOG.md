@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Windows: detect a UTF-8 console (output code page 65001, also forced at startup) and truecolor on Windows Terminal / VS Code, so modern Windows terminals get Unicode box-drawing and 24-bit color instead of the ASCII / 256-color fallback
+- Windows: the dashboard now reflows on window resize (no SIGWINCH on Windows; the key thread wakes a repaint on the resize event)
+
+### Notes
+
+- The Windows binary is built in CI but has not been verified at runtime on a real Windows machine; see the README install note
+
 ## v1.2.0 - 2026-05-30
 
 ### Added
