@@ -52,13 +52,15 @@ accept no liability. Use at your own risk.
 
 ```
 cargo install mirage-tui          # or grab a binary from the releases page
-cd /path/to/your/torrents         # a directory holding .torrent files
-mirage                            # watches the current directory by default
+mkdir -p torrents                 # default torrent directory
+cp your.torrent torrents/
+mirage                            # reads torrents/ in the current directory
 ```
 
-Mirage loads every `.torrent` in the directory, picks a client to emulate
-(`auto` detects your local Transmission), and opens the live dashboard. No config
-file is required; see [Configuration](#configuration) to tune the defaults.
+Mirage loads every `.torrent` from the `torrents/` subdirectory of the current
+directory, picks a client to emulate (`auto` detects your local Transmission),
+and opens the live dashboard. No config file is required; see
+[Configuration](#configuration) to tune the defaults.
 
 ## How it works
 

@@ -66,7 +66,7 @@ impl Default for Config {
             numwant: None,
             torrent_dir: std::env::var("TORRENT_DIR")
                 .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from(".")),
+                .unwrap_or_else(|_| PathBuf::from("torrents")),
             //client: fake_torrent_client::Client::from(fake_torrent_client::clients::ClientVersion::Qbittorrent_4_4_2),
             // key_refresh_every: 0,
             // "auto" detects & faithfully emulates the locally installed
