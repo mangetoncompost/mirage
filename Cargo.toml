@@ -1,13 +1,37 @@
 [package]
-name = "mirage"
+name = "mirage-tui"
 authors = ["mangetoncompost"]
 version = "1.2.1"
 edition = "2024"
-keywords = ["torrent", "ratio", "upload", "cli"]
+rust-version = "1.87"
+license = "MIT"
 description = "CLI tool to fake your torrent upload in order to increase your ratio."
+repository = "https://github.com/mangetoncompost/mirage"
+homepage = "https://github.com/mangetoncompost/mirage"
+readme = "README.md"
+keywords = ["torrent", "ratio", "upload", "cli", "tui"]
+categories = ["command-line-utilities"]
+exclude = [
+    "assets/",
+    "www/",
+    "scripts/",
+    "demo.tape",
+    "torrents/",
+    "*.torrent",
+    "Mirage.app/",
+    ".github/",
+    ".vscode/",
+]
+
+# Published on crates.io as `mirage-tui` (the name `mirage` was taken).
+# The installed binary stays `mirage`: cargo install mirage-tui, then run `mirage`.
 
 # macOS launcher: scripts/make_app.sh wraps the release binary in a Mirage.app
 # that opens the live dashboard in Terminal.app. No GUI deps, no cargo bundle.
+
+[[bin]]
+name = "mirage"
+path = "src/main.rs"
 
 [dependencies]
 fastrand = "2.3"
