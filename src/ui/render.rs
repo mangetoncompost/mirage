@@ -286,7 +286,7 @@ const TAB_LABELS: [&str; 10] = [
 
 /// Build the whole frame as one ANSI string ready for `draw::paint`.
 ///
-/// `view` selects which of the nine tab bodies to render; `sel` is the
+/// `view` selects which of the ten tab bodies to render; `sel` is the
 /// highlighted row within list-style views (Dashboard/Torrents/Trackers).
 pub fn build_frame(
     f: &Frame,
