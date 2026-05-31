@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.3.3 - 2026-05-31
+
+### Fixed
+
+- The info_hash is now the SHA-1 of the original info-dictionary bytes instead of a re-encode. A non-canonical (but valid) .torrent previously got the wrong hash, so the tracker rejected every announce and the torrent never earned ratio. Duplicate keys and trailing data after the metainfo dictionary are now rejected
+- Control characters in torrent names (CR, LF, ESC) are stripped at parse time, so a hostile .torrent name can no longer corrupt or clear the terminal
+- Multi-file torrents whose lengths overflow the total are rejected instead of wrapping to a wrong size
+- The JSON stats file is written atomically (temp plus rename), so a reader or a crash never sees a truncated file
+- Upload byte accumulation uses saturating_add, matching the rest of the accounting
+
 ## v1.3.2 - 2026-05-31
 
 ### Fixed
