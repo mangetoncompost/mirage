@@ -52,3 +52,21 @@ cargo fmt --check
 
 The codebase uses `rustfmt` defaults and passes `clippy` with `-D warnings`.
 Run `cargo fmt` before committing.
+
+## Releasing
+
+Releases are driven by git tags. The tag is the single source of truth for the
+version: pushing a `vX.Y.Z` tag triggers the release workflow, which rewrites
+`Cargo.toml` from the tag, builds the binaries for all platforms, creates the
+GitHub Release, and publishes the crate to crates.io as `mirage-tui`.
+
+To cut a release:
+
+```
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+There is no need to edit the `version` field in `Cargo.toml` by hand; the
+workflow sets it from the tag (see `scripts/set_version.sh`). Use semantic
+versioning, and never reuse a version already published on crates.io.
