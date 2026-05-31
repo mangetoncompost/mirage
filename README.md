@@ -2,11 +2,15 @@
 
 [![Build](https://img.shields.io/github/actions/workflow/status/mangetoncompost/mirage/ci.yml?branch=master)](https://github.com/mangetoncompost/mirage/actions)
 [![Release](https://img.shields.io/github/v/release/mangetoncompost/mirage)](https://github.com/mangetoncompost/mirage/releases/latest)
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
-[![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey)](https://github.com/mangetoncompost/mirage)
+[![Crates.io](https://img.shields.io/crates/v/mirage-tui)](https://crates.io/crates/mirage-tui)
+[![License](https://img.shields.io/github/license/mangetoncompost/mirage)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.87%2B-orange?logo=rust)](https://www.rust-lang.org)
+[![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey)](https://github.com/mangetoncompost/mirage/releases/latest)
 
 ![Mirage dashboard demo](assets/demo.gif)
+
+Report fake BitTorrent upload to trackers, without connecting to any peer or
+transferring any data.
 
 Mirage is a command-line tool that announces fake BitTorrent upload to trackers
 in order to increase a user's ratio on private or public trackers. It reads real
@@ -19,6 +23,42 @@ the curve displayed in the live dashboard.
 It does not connect to peers, does not transfer data, and does not modify any
 torrent file. The only network traffic it generates is tracker announces.
 
+## Features
+
+- Emulates a real client at the wire level (peer_id, key, User-Agent, announce
+  parameters), auto-detecting the locally installed Transmission version
+- Models a full leech-then-seed lifecycle, so upload is never declared on a file
+  that was never downloaded
+- Time-varying upload curve with per-torrent harmonics and jitter to defeat
+  pattern fingerprinting; declared upload always matches what the dashboard shows
+- Optional swarm-proportional cap, so Mirage never declares near-line-speed to an
+  almost empty swarm
+- HTTP (BEP-3) and UDP (BEP-15) trackers, every URL in the announce-list
+- Live 10-tab dashboard with a plausibility linter, command palette, and ratio
+  graph
+- Atomic state persistence: download progress survives restarts
+- Single static binary, zero runtime dependencies, no peer connections
+
+## Disclaimer
+
+Mirage is provided for educational and research purposes. Reporting upload you
+did not perform violates the terms of service of effectively every public and
+private tracker, and can result in a ban or other consequences on the trackers
+you use it against. You are solely responsible for how you use this tool and for
+complying with the rules of any tracker and with applicable law. The authors
+accept no liability. Use at your own risk.
+
+## Quickstart
+
+```
+cargo install mirage-tui          # or grab a binary from the releases page
+cd /path/to/your/torrents         # a directory holding .torrent files
+mirage                            # watches the current directory by default
+```
+
+Mirage loads every `.torrent` in the directory, picks a client to emulate
+(`auto` detects your local Transmission), and opens the live dashboard. No config
+file is required; see [Configuration](#configuration) to tune the defaults.
 
 ## How it works
 
@@ -485,11 +525,14 @@ src/
     udp.rs             UDP tracker announce (BEP-15)
   ui/
     mod.rs             TUI entry point, render loop, SIGWINCH/SIGCONT handling
-    draw.rs            Terminal I/O: alternate screen, raw mode, paint
-    render.rs          Frame builder: all nine tab views, ANSI output
+    draw.rs            Terminal I/O: alternate screen, raw mode, paint, OSC-52 clipboard
+    render.rs          Frame builder: all ten tab views, overlays, ANSI output
+    overlay.rs         Help, command palette, detail card, confirm-remove state
     snapshot.rs        Lock-safe state snapshots for the renderer
+    history.rs         Time-series ring buffer for the ratio graph and speed meter
     events.rs          In-process event ring buffer
     view.rs            Tab and row selection atomics
+    notify.rs          Ratio-milestone desktop notifications (OSC 9 / osascript / notify-send)
     keys.rs            Blocking key reader (OS thread)
 scripts/
   make_app.sh          macOS .app bundle builder
@@ -506,3 +549,11 @@ tests/
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Resources
+
+- [Changelog](CHANGELOG.md)
+- [Contributing guide](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
+- [License (MIT)](LICENSE)
