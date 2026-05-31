@@ -110,6 +110,21 @@ and the process exits.
 
 ## Installation
 
+### Install from crates.io
+
+If you have a Rust toolchain, install the latest release with Cargo:
+
+```
+cargo install mirage-tui
+```
+
+The crate is published as `mirage-tui` (the name `mirage` was already taken on
+crates.io). The installed binary is still `mirage`, so run it with:
+
+```
+mirage
+```
+
 ### Download a pre-built binary
 
 Pre-compiled binaries for Linux, macOS, and Windows are available on the

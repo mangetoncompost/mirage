@@ -156,3 +156,21 @@ jobs:
             mirage-macos-x86_64
             mirage-windows-x86_64.exe
             Mirage.app.zip
+
+  publish-crate:
+    name: Publish to crates.io
+    needs: [build-linux, build-macos, build-windows, build-macos-app]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Publish
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
