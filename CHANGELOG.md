@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.3.0 - 2026-05-31
+
+### Added
+
+- Trackers tab (`3 trk`): press `g` to toggle a by-tracker rollup (one row per host with torrent count, summed upload, speed, seeders/leechers, and errors, sorted by upload)
+- Plausibility linter overlay (`!`): flags settings a private tracker might find implausible (upload far past the torrent size, near-line-speed upload to an almost empty swarm)
+- Ratio tab (`0 rto`): ETA to the next ratio milestone, projected from the average credited rate
+- Swarm-proportional upload cap: optional `per_leecher_kib_s` config key scales each torrent's fake speed with its leecher count, so Mirage never declares near-line-speed to an almost empty swarm. Off by default
+- Discreet milestone notifications: optional `notify_milestones` config key emits a terminal OSC 9 escape and a best-effort `osascript`/`notify-send` notification on each ratio milestone. Off by default, no terminal bell
+- Detail card wire sub-tab (`w`): the last announce exchange (request, status, response body) for the selected torrent
+
 ## v1.2.1 - 2026-05-31
 
 ### Changed
