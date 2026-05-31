@@ -27,6 +27,10 @@ pub enum Overlay {
     /// Confirmation prompt before a destructive remove. The target hashes are
     /// held in `CONFIRM_TARGETS`; `y`/Enter commits, `Esc`/`n` cancels.
     ConfirmRemove,
+    /// Plausibility linter: a read-only card flagging settings a private tracker
+    /// might find implausible (ratio climbing too fast, speed above a believable
+    /// home-line cap, upload far past the torrent size). Toggled with `!`.
+    Plausibility,
 }
 
 // --- process-global overlay state (one atomic per overlay type) ---------------
@@ -37,6 +41,8 @@ static HELP: AtomicBool = AtomicBool::new(false);
 static PALETTE: AtomicBool = AtomicBool::new(false);
 /// Detail overlay open?
 static DETAIL: AtomicBool = AtomicBool::new(false);
+/// Plausibility linter overlay open?
+static PLAUSIBILITY: AtomicBool = AtomicBool::new(false);
 /// Sub-tab index inside the Detail overlay (0=info, 1=wire).
 pub static DETAIL_SUB: AtomicU8 = AtomicU8::new(0);
 
@@ -61,6 +67,8 @@ pub fn active() -> Overlay {
         Overlay::Help
     } else if PALETTE.load(Ordering::Relaxed) {
         Overlay::Palette
+    } else if PLAUSIBILITY.load(Ordering::Relaxed) {
+        Overlay::Plausibility
     } else if DETAIL.load(Ordering::Relaxed) {
         Overlay::Detail
     } else {
@@ -75,6 +83,15 @@ pub fn help_open() -> bool {
 }
 pub fn toggle_help() {
     HELP.fetch_xor(true, Ordering::Relaxed);
+}
+
+// --- Plausibility linter -----------------------------------------------------
+
+pub fn plausibility_open() -> bool {
+    PLAUSIBILITY.load(Ordering::Relaxed)
+}
+pub fn toggle_plausibility() {
+    PLAUSIBILITY.fetch_xor(true, Ordering::Relaxed);
 }
 
 // --- Palette -----------------------------------------------------------------
@@ -202,7 +219,17 @@ static CELEBRATE_UNTIL_TICK: AtomicU64 = AtomicU64::new(0);
 static CELEBRATE_LABEL: Mutex<String> = Mutex::new(String::new());
 
 /// The milestones in tenths (10 = 1.0×, 15 = 1.5×, …).
-const MILESTONES_TENTHS: &[u64] = &[10, 15, 20, 30, 50, 100];
+pub const MILESTONES_TENTHS: &[u64] = &[10, 15, 20, 30, 50, 100];
+
+/// The lowest milestone (in tenths) strictly above the current ratio, or `None`
+/// once the highest milestone is reached. `ratio_tenths` is `uploaded*10/length`.
+/// Used by the ratio tab to project an ETA to the next celebration.
+pub fn next_milestone_tenths(ratio_tenths: u64) -> Option<u64> {
+    MILESTONES_TENTHS
+        .iter()
+        .copied()
+        .find(|&m| m > ratio_tenths)
+}
 
 /// Check if the global ratio crossed a new milestone. `total_up` is the summed
 /// uploaded bytes, `total_len` is the summed torrent lengths (only seeding).

@@ -170,6 +170,23 @@ pub struct Torrent {
     /// surfaced by the Schedule ledger (F3.3). See [`ScheduleReason`].
     /// 0 = interval, 1 = warm-up, 2 = re-check, 3 = download-tick.
     pub schedule_reason: u8,
+    /// Last announce wire snapshot: the outgoing request (URL or summary) and
+    /// the raw tracker response. Transient, not persisted. Updated by the
+    /// announcer on every successful or failed announce.
+    pub last_wire: Option<WireCapture>,
+}
+
+/// Per-torrent snapshot of the last announce exchange, shown in the wire sub-view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WireCapture {
+    /// "HTTP" or "UDP"
+    pub proto: &'static str,
+    /// Outgoing URL (HTTP) or request summary (UDP).
+    pub req: String,
+    /// HTTP status line or "OK" / error string for UDP.
+    pub status: String,
+    /// Response body (HTTP, truncated + printable) or field summary (UDP).
+    pub resp: String,
 }
 
 /// Cadence-reason codes stamped on [`Torrent::schedule_reason`]. Kept as a `u8`
@@ -362,6 +379,32 @@ impl Torrent {
         );
     }
 
+    /// Swarm-proportional scaling factor in [0.0, 1.0], applied to the upload
+    /// curve so a torrent never declares near-line-speed to an almost-empty
+    /// swarm. Returns 1.0 (no effect) unless `per_leecher_kib_s` is configured.
+    ///
+    /// It is a pure function of `self.leechers` and the config, piecewise
+    /// constant across an announce window (leechers only change at announce
+    /// time), so multiplying it into BOTH `speed_at` and `integrate` keeps them
+    /// exactly proportional - the same reasoning that lets `speed_multiplier`
+    /// commute with the integral. With the cap off it is the constant 1.0, so
+    /// numeric behaviour (and the curve test) is identical to before.
+    pub fn swarm_factor(&self) -> f64 {
+        let cfg = crate::CONFIG.load();
+        let per_leecher = match cfg.per_leecher_kib_s {
+            Some(k) => k as u64,
+            None => return 1.0,
+        };
+        let max = cfg.max_upload_rate as u64;
+        if max == 0 {
+            return 1.0;
+        }
+        let cap_bytes = per_leecher
+            .saturating_mul(1024)
+            .saturating_mul(self.leechers as u64);
+        (cap_bytes as f64 / max as f64).clamp(0.0, 1.0)
+    }
+
     /// Instantaneous fake upload rate (bytes/s) at elapsed time `t` seconds
     /// (measured from `self.origin`). Pure function of (speed_seed, t): the SAME
     /// function backs both the live dashboard display and the announce integral,
@@ -380,11 +423,11 @@ impl Torrent {
             s += h * weight * (omega * t + speed_phase(self.speed_seed, i)).sin();
         }
         debug_assert!(SPEED_WEIGHTS.iter().sum::<f64>() <= 1.0 + 1e-9);
-        // Scale by the global multiplier AFTER the [min,max] rounding guard. The
-        // multiplier is the same scalar `integrate` applies, so display and
-        // declared stay exactly proportional. It is 1.0 in non-TTY mode → identical
-        // numeric behaviour to before.
-        s.clamp(min, max) * speed_multiplier()
+        // Scale by the global multiplier AFTER the [min,max] rounding guard, then
+        // by the swarm factor. Both are the same scalars `integrate` applies, so
+        // display and declared stay exactly proportional. Both are 1.0 by default
+        // (non-TTY multiplier, cap off) → identical numeric behaviour to before.
+        s.clamp(min, max) * speed_multiplier() * self.swarm_factor()
     }
 
     /// Closed-form integral of `speed_at` over [t0, t1], in BYTES.
@@ -406,12 +449,12 @@ impl Torrent {
             let amp = h * weight / omega;
             area += amp * ((omega * t0 + ph).cos() - (omega * t1 + ph).cos());
         }
-        // Same global multiplier as `speed_at`, applied to the whole window. A
-        // linear factor commutes with integration, so declared bytes == area
-        // under the displayed (scaled) curve. The factor in force when integrate()
-        // runs (announce time) scales the whole window - not applied retroactively
-        // per keypress; the bounded one-window discrepancy is accepted.
-        area * speed_multiplier()
+        // Same global multiplier AND swarm factor as `speed_at`, applied to the
+        // whole window. Both are linear factors and commute with integration, so
+        // declared bytes == area under the displayed (scaled) curve. The values
+        // in force when integrate() runs (announce time) scale the whole window;
+        // the bounded one-window discrepancy is accepted, as for the multiplier.
+        area * speed_multiplier() * self.swarm_factor()
     }
 
     // /// Load essential data from a parsed torrent using the full parsed torrent file. It reduces the RAM use to have smaller data
@@ -675,6 +718,7 @@ impl Torrent {
             completed_sent: false,
             upload_target: None,
             schedule_reason: 0,
+            last_wire: None,
         })
     }
 }
@@ -712,6 +756,7 @@ mod tests {
             completed_sent: false,
             upload_target: None,
             schedule_reason: 0,
+            last_wire: None,
         }
     }
 
@@ -803,6 +848,7 @@ mod tests {
             completed_sent: false,
             upload_target: None,
             schedule_reason: 0,
+            last_wire: None,
         };
         assert!(t.can_upload());
 
@@ -834,6 +880,43 @@ mod tests {
         // (c) Degenerate windows declare nothing.
         assert_eq!(t.integrate(10.0, 10.0), 0.0);
         assert_eq!(t.integrate(20.0, 10.0), 0.0);
+
+        // (c2) Swarm-proportional cap. With the cap off (default) the factor is
+        // exactly 1.0. Turn it on and verify it scales linearly with leechers,
+        // saturates at 1.0, and that speed_at/integrate stay proportional (the
+        // declared==area invariant) under a sub-1.0 factor.
+        assert_eq!(t.swarm_factor(), 1.0, "cap off => factor 1.0");
+        let speed_full = t.speed_at(500.0);
+        let area_full = t.integrate(0.0, 1800.0);
+        {
+            // 64 KiB/s per leecher, cap 10 MiB/s: saturates at 160 leechers.
+            let capped = crate::config::Config {
+                min_upload_rate: 1_048_576,
+                max_upload_rate: 10_485_760,
+                per_leecher_kib_s: Some(64),
+                ..crate::config::Config::default()
+            };
+            crate::CONFIG.store(std::sync::Arc::new(capped));
+        }
+        // 16 leechers * 64 KiB/s = 1 MiB/s budget against a 10 MiB/s cap = 0.1.
+        let f = t.swarm_factor();
+        assert!((f - 0.1).abs() < 1e-9, "factor={f}");
+        // Both functions scaled by the same factor => still proportional.
+        assert!((t.speed_at(500.0) - speed_full * f).abs() < 1.0);
+        assert!((t.integrate(0.0, 1800.0) - area_full * f).abs() / area_full.max(1.0) < 1e-6);
+        // Saturation: a huge swarm clamps to 1.0 (65535 * 64 KiB/s >> 10 MiB/s).
+        t.leechers = u16::MAX;
+        assert_eq!(t.swarm_factor(), 1.0, "huge swarm clamps to 1.0");
+        // Restore the uncapped config for any later assertions / other tests.
+        {
+            let restore = crate::config::Config {
+                min_upload_rate: 1_048_576,
+                max_upload_rate: 10_485_760,
+                ..crate::config::Config::default()
+            };
+            crate::CONFIG.store(std::sync::Arc::new(restore));
+        }
+        t.leechers = 16;
 
         // (d) Gating: no leechers => zero speed and zero area.
         t.seeders = 0;
@@ -871,6 +954,7 @@ mod tests {
             completed_sent: false,
             upload_target: None,
             schedule_reason: 0,
+            last_wire: None,
         };
         assert!(!t.can_upload());
         t.leechers = 5;
@@ -911,6 +995,7 @@ mod tests {
             completed_sent: false,
             upload_target: None,
             schedule_reason: 0,
+            last_wire: None,
         };
         let speed = t.uploaded(16, 64);
         assert!(speed > 0);

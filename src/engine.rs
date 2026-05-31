@@ -143,6 +143,10 @@ async fn save_config_toml() {
     );
     tbl.insert("use_pid_file".into(), toml::Value::Boolean(c.use_pid_file));
     tbl.insert(
+        "notify_milestones".into(),
+        toml::Value::Boolean(c.notify_milestones),
+    );
+    tbl.insert(
         "torrent_dir".into(),
         toml::Value::String(c.torrent_dir.display().to_string()),
     );
@@ -151,6 +155,9 @@ async fn save_config_toml() {
             "output_stats".into(),
             toml::Value::String(p.display().to_string()),
         );
+    }
+    if let Some(k) = c.per_leecher_kib_s {
+        tbl.insert("per_leecher_kib_s".into(), toml::Value::Integer(k as i64));
     }
     let toml_str = toml::to_string(&tbl).unwrap_or_else(|e| {
         tracing::warn!("SaveConfig: serialize failed: {e}");

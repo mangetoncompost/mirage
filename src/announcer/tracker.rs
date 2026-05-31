@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::bencode::{BencodeDecoder, BencodeValue};
-use crate::torrent::Torrent;
+use crate::torrent::{Torrent, WireCapture};
 use crate::ui::{EventKind, emit};
 use crate::{CLIENT, CONFIG, TORRENTS};
 use fake_torrent_client::Client;
@@ -428,6 +428,7 @@ async fn announce_http(
     match request_builder.send().await {
         Ok(resp) => {
             let status = resp.status().as_u16();
+            let status_line = format!("HTTP {status}");
             info!(
                 "\tTime since last announce: {}s \t interval: {}",
                 torrent.last_announce.elapsed().as_secs(),
@@ -441,10 +442,36 @@ async fn announce_http(
                     error!("Failed to read response bytes: {:?}", e);
                     emit(EventKind::Error, &torrent.name, format!("body read: {e}"));
                     torrent.error_count = torrent.error_count.saturating_add(1);
-                    return torrent.interval; // return current interval
+                    torrent.last_wire = Some(WireCapture {
+                        proto: "HTTP",
+                        req: built_url.clone(),
+                        status: status_line,
+                        resp: format!("body read error: {e}"),
+                    });
+                    return torrent.interval;
                 }
             };
-            let bytes_vec = bytes.to_vec(); //convert Bytes to Vec<u8>
+            let bytes_vec = bytes.to_vec();
+            // Capture the wire snapshot. Body is converted to printable ASCII
+            // (non-printable bytes become '.'), truncated to 1024 chars so the
+            // overlay never overflows the screen.
+            let body_str: String = bytes_vec
+                .iter()
+                .take(1024)
+                .map(|&b| {
+                    if b.is_ascii_graphic() || b == b' ' {
+                        b as char
+                    } else {
+                        '.'
+                    }
+                })
+                .collect();
+            torrent.last_wire = Some(WireCapture {
+                proto: "HTTP",
+                req: built_url.clone(),
+                status: status_line,
+                resp: body_str,
+            });
 
             // we start to check if the tracker has returned an error message, if yes, we will reannounce later
             trace!(
@@ -592,6 +619,12 @@ async fn announce_http(
             error!("Cannot announce: {:?}", err);
             emit(EventKind::Error, &torrent.name, format!("HTTP fail: {err}"));
             torrent.error_count = torrent.error_count.saturating_add(1);
+            torrent.last_wire = Some(WireCapture {
+                proto: "HTTP",
+                req: built_url.clone(),
+                status: format!("error: {err}"),
+                resp: String::new(),
+            });
         }
     }
     // On error (or a tracker that returned no interval) torrent.interval stays 0,
