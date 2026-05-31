@@ -86,8 +86,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleName</key><string>Mirage</string>
     <key>CFBundleDisplayName</key><string>Mirage</string>
     <key>CFBundleIdentifier</key><string>coop.assembleurs.mirage</string>
-    <key>CFBundleVersion</key><string>1.2.0</string>
-    <key>CFBundleShortVersionString</key><string>1.2.0</string>
+    <key>CFBundleVersion</key><string>1.2.1</string>
+    <key>CFBundleShortVersionString</key><string>1.2.1</string>
     <key>CFBundleExecutable</key><string>Mirage</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleIconFile</key><string>Mirage.icns</string>
