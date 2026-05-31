@@ -570,7 +570,9 @@ async fn announce_http(
                                 // Accumulate the fake uploaded bytes we just
                                 // declared to the tracker (mirrors the UDP path,
                                 // which does the same on a successful announce).
-                                torrent.uploaded += uploaded;
+                                // saturating_add to match every other byte-accounting
+                                // site and never panic/wrap at the u64 ceiling.
+                                torrent.uploaded = torrent.uploaded.saturating_add(uploaded);
 
                                 // Reset last_announce and error_count on successful response
                                 torrent.last_announce = std::time::Instant::now();

@@ -354,8 +354,9 @@ pub async fn announce_udp(
 
     match tracker.announce(&request).await {
         Ok(response) => {
-            // Update torrent state on successful announce
-            torrent.uploaded += uploaded;
+            // Update torrent state on successful announce. saturating_add to
+            // match the rest of the byte accounting and never panic/wrap.
+            torrent.uploaded = torrent.uploaded.saturating_add(uploaded);
             // Clamp like the HTTP path: a 0 interval would busy-spin the scheduler.
             torrent.interval = crate::announcer::tracker::clamp_interval(response.interval as i64);
             // Clamp instead of `as u16` to avoid wrapping a >65535 count to a
