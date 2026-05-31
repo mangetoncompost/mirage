@@ -33,6 +33,14 @@ use std::sync::Mutex;
 /// also `Clear(Purge)` (ESC[3J) to wipe that scrollback - otherwise you can
 /// scroll up and see the shell/clear output behind the dashboard.
 fn enter_screen() {
+    // Windows consoles default to a legacy OEM code page (437/850/...), under
+    // which the UTF-8 bytes Mirage writes for box-drawing and glyphs would be
+    // mojibake. Force the console output code page to UTF-8 (65001) so the frame
+    // renders as intended; this also makes render's UTF-8 capability probe true.
+    // No-op (and absent) on non-Windows, where the locale governs encoding.
+    #[cfg(windows)]
+    set_windows_utf8_codepage();
+
     let mut o = stdout();
     let _ = enable_raw_mode();
     let _ = execute!(
@@ -44,6 +52,20 @@ fn enter_screen() {
         Hide,
         DisableBracketedPaste,
     );
+}
+
+/// Set the Windows console output code page to UTF-8 (65001). Best-effort:
+/// failure leaves the previous code page, and render's ASCII fallback still
+/// produces a readable frame. Declared inline to avoid a new crate.
+#[cfg(windows)]
+fn set_windows_utf8_codepage() {
+    unsafe extern "system" {
+        fn SetConsoleOutputCP(cp: u32) -> i32;
+    }
+    const CP_UTF8: u32 = 65001;
+    unsafe {
+        let _ = SetConsoleOutputCP(CP_UTF8);
+    }
 }
 
 /// RAII guard: `enter()` on construction, `restore()` on Drop (normal-return path).
