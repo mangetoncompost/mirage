@@ -68,15 +68,28 @@ pub async fn write() {
                     data.push(',');
                 }
                 let t = m.lock().await;
-                total_uploaded += t.uploaded;
+                total_uploaded = total_uploaded.saturating_add(t.uploaded);
                 data.push_str(&t.to_json());
             }
         }
         data.push_str("\n],\"total_uploaded\":");
         data.push_str(&total_uploaded.to_string());
         data.push('}');
-        if let Err(e) = tokio::fs::write(path, data.as_bytes()).await {
-            error!("Cannot write stat file: {e}");
+        // Write atomically: a reader (e.g. a web server serving this file, as the
+        // README suggests) and a crash mid-write must never see a truncated file.
+        // Write to a sibling temp then rename, which is atomic within a filesystem.
+        // This runs every scheduler tick, and the scheduler awaits each write
+        // serially, so a fixed .tmp suffix is safe here.
+        let mut tmp = path.clone().into_os_string();
+        tmp.push(".tmp");
+        let tmp = std::path::PathBuf::from(tmp);
+        if let Err(e) = tokio::fs::write(&tmp, data.as_bytes()).await {
+            error!("Cannot write stat temp file: {e}");
+            return;
+        }
+        if let Err(e) = tokio::fs::rename(&tmp, &path).await {
+            error!("Cannot publish stat file: {e}");
+            let _ = tokio::fs::remove_file(&tmp).await;
         }
     }
 }
