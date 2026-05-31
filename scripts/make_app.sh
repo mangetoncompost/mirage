@@ -11,6 +11,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$ROOT/target/release/mirage"
 APP="$ROOT/Mirage.app"
 
+# Read the version from Cargo.toml so the bundle stays in sync with the crate
+# (the release workflow rewrites Cargo.toml from the git tag before calling us).
+VERSION="$(grep -m1 '^version = ' "$ROOT/Cargo.toml" | sed -E 's/version = "([^"]*)"/\1/')"
+
 if [[ ! -x "$BIN" ]]; then
   echo "error: release binary not found at $BIN" >&2
   echo "run: cargo build --release" >&2
@@ -86,8 +90,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleName</key><string>Mirage</string>
     <key>CFBundleDisplayName</key><string>Mirage</string>
     <key>CFBundleIdentifier</key><string>coop.assembleurs.mirage</string>
-    <key>CFBundleVersion</key><string>1.2.1</string>
-    <key>CFBundleShortVersionString</key><string>1.2.1</string>
+    <key>CFBundleVersion</key><string>$VERSION</string>
+    <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleExecutable</key><string>Mirage</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleIconFile</key><string>Mirage.icns</string>

@@ -15,6 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set version from tag
+        run: bash scripts/set_version.sh "${{ github.ref_name }}"
+
       - name: Install musl tools
         run: sudo apt-get install -y musl-tools
 
@@ -51,6 +54,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set version from tag
+        run: bash scripts/set_version.sh "${{ github.ref_name }}"
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -77,6 +83,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set version from tag
+        shell: bash
+        run: bash scripts/set_version.sh "${{ github.ref_name }}"
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -100,6 +110,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set version from tag
+        run: bash scripts/set_version.sh "${{ github.ref_name }}"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -164,6 +177,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set version from tag
+        run: bash scripts/set_version.sh "${{ github.ref_name }}"
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -171,6 +187,12 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Publish
-        run: cargo publish --locked
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if cargo search mirage-tui | grep -q "^mirage-tui = \"$version\""; then
+            echo "mirage-tui $version already on crates.io, skipping publish."
+            exit 0
+          fi
+          cargo publish --locked --allow-dirty
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
