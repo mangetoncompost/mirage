@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.3.2 - 2026-05-31
+
+### Fixed
+
+- With no torrents found, the dashboard now opens with the onboarding hint instead of exiting instantly with no visible message (the "No torrent, exiting" log was silent in TUI mode); in non-interactive mode it prints where it looked and exits
+- The default `torrent_dir` is `torrents/` (relative to the launch directory), so a fresh checkout runs without setting `TORRENT_DIR` or a config path
+
 ## v1.3.1 - 2026-05-31
 
 ### Fixed
