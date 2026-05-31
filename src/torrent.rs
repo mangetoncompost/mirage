@@ -685,7 +685,14 @@ impl Torrent {
                                 "file.length is negative".to_string(),
                             ));
                         }
-                        total_length += *file_len as u64;
+                        // Reject overflow rather than panic (debug) or wrap
+                        // (release): a crafted multi-file torrent with lengths
+                        // near i64::MAX would otherwise produce a tiny wrong
+                        // total, corrupting left/ratio/state.
+                        total_length =
+                            total_length.checked_add(*file_len as u64).ok_or_else(|| {
+                                TorrentError::ParseError("total length overflow".to_string())
+                            })?;
                     } else {
                         return Err(TorrentError::MissingField(
                             "file.length in multi-file torrent",
@@ -780,6 +787,18 @@ mod tests {
             t.info_hash, expected,
             "info_hash must be SHA-1 of the source info bytes, not a re-encode"
         );
+    }
+
+    #[test]
+    fn multifile_length_overflow_is_rejected() {
+        // Three files each at i64::MAX overflow the u64 sum (2*i64::MAX fits in
+        // u64, but 3*i64::MAX does not). Build a multi-file info dict.
+        let big = i64::MAX.to_string();
+        let file = format!("d6:lengthi{big}ee");
+        let info = format!("d5:filesl{file}{file}{file}e4:name1:xe");
+        let data = format!("d8:announce25:http://t.example/announce4:info{info}e");
+        let r = Torrent::from_bencode_bytes(data.as_bytes());
+        assert!(r.is_err(), "overflowing multi-file total must be rejected");
     }
 
     #[test]
