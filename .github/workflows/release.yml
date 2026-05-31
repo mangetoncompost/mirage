@@ -188,11 +188,22 @@ jobs:
 
       - name: Publish
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          if cargo search mirage-tui | grep -q "^mirage-tui = \"$version\""; then
-            echo "mirage-tui $version already on crates.io, skipping publish."
+          # Run the publish and capture its output. Treat the "already exists"
+          # case as success (re-tagging or a re-run of the same version is not an
+          # error), but fail on any other publish error. This is more robust than
+          # pre-checking `cargo search`, whose output format is brittle and missed
+          # the already-published case before.
+          set +e
+          out="$(cargo publish --locked --allow-dirty 2>&1)"
+          code=$?
+          echo "$out"
+          if [ "$code" -eq 0 ]; then
             exit 0
           fi
-          cargo publish --locked --allow-dirty
+          if echo "$out" | grep -q "already exists on crates.io"; then
+            echo "mirage-tui ${GITHUB_REF_NAME#v} already on crates.io; treating as success."
+            exit 0
+          fi
+          exit "$code"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
