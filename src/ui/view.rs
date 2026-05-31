@@ -43,6 +43,21 @@ impl View {
 static ACTIVE_VIEW: AtomicUsize = AtomicUsize::new(0);
 /// Selected row within list-style views (Dashboard/Torrents/Trackers).
 static SEL: AtomicUsize = AtomicUsize::new(0);
+/// Trackers tab: false = per-torrent rows (default), true = aggregated by host.
+/// Toggled with `g` while the Trackers tab is active. Read once per tick in
+/// `render_once` and passed into `build_frame` as a plain bool.
+static TRK_AGGREGATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Is the Trackers tab in aggregated-by-host mode?
+pub fn trk_aggregated() -> bool {
+    TRK_AGGREGATED.load(Ordering::Relaxed)
+}
+
+/// Flip the Trackers tab between per-torrent and aggregated-by-host.
+pub fn toggle_trk_aggregated() {
+    TRK_AGGREGATED.fetch_xor(true, Ordering::Relaxed);
+    super::request_redraw();
+}
 /// Multi-selected torrent info-hashes (F2.1). Empty = no batch selection.
 /// Cleared on tab switch (set_view) so a stale set never targets dead torrents.
 static MARKED: Lazy<Mutex<HashSet<[u8; 20]>>> = Lazy::new(|| Mutex::new(HashSet::new()));

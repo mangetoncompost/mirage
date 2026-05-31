@@ -39,6 +39,17 @@ pub struct Config {
     /// Output file path for the JSON file.
     /// You may want somethink like `/var/www/mirage.json` to expose it on your web server.
     pub output_stats: Option<PathBuf>,
+    /// Emit a discreet desktop notification (terminal OSC 9 when the dashboard is
+    /// active, else a best-effort `osascript`/`notify-send` shell-out) on a ratio
+    /// milestone. Off by default: nothing is ever sent unless this is true. No
+    /// terminal bell is used.
+    pub notify_milestones: bool,
+    /// Swarm-proportional upload cap: per-leecher upload budget in KiB/s. When
+    /// `Some(k)`, each torrent's fake speed scales with its leecher count toward
+    /// the configured `max_upload_rate` (declaring near-line-speed to an almost
+    /// empty swarm is a classic ratio-faking tell). `None` (the default) keeps
+    /// the original behaviour: the curve ignores swarm size entirely.
+    pub per_leecher_kib_s: Option<u32>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -60,6 +71,8 @@ impl Default for Config {
             // Transmission version (falls back to a built-in profile if absent).
             client: String::from("auto"),
             output_stats: None,
+            notify_milestones: false,
+            per_leecher_kib_s: None,
         }
     }
 }
@@ -125,6 +138,26 @@ impl Config {
                     }
                     // Note: the redundant bool::from_str fallback has been removed -
                     // as_bool() is authoritative for TOML boolean values.
+                }
+
+                if let Some(n) = root_table.get("notify_milestones") {
+                    if let Some(v) = n.as_bool() {
+                        config.notify_milestones = v;
+                    } else {
+                        error!("notify_milestones is not a boolean");
+                    }
+                }
+
+                if let Some(plk) = root_table.get("per_leecher_kib_s") {
+                    if let Some(v) = plk.as_integer() {
+                        if (1..=i64::from(u32::MAX)).contains(&v) {
+                            config.per_leecher_kib_s = Some(v as u32);
+                        } else {
+                            error!("Invalid per_leecher_kib_s (expected 1..=u32::MAX)");
+                        }
+                    } else {
+                        error!("per_leecher_kib_s is not an integer");
+                    }
                 }
 
                 // Rate fields: validate range [0, u32::MAX] and fall through on

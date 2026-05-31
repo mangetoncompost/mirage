@@ -289,6 +289,7 @@ mod tests {
             completed_sent: false,
             upload_target: None,
             schedule_reason: 0,
+            last_wire: None,
         };
         let key = hex40(&t.info_hash);
 

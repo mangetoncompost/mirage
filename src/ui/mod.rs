@@ -11,6 +11,7 @@ pub mod draw;
 mod events;
 mod history;
 pub mod keys;
+mod notify;
 pub mod overlay;
 mod render;
 mod snapshot;
@@ -121,14 +122,59 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
                 "session",
                 overlay::celebration_label(),
             );
+            // Discreet desktop/terminal notification (off unless opted in). Fired
+            // here so it inherits check_milestone's once-per-milestone debounce.
+            notify::milestone(&overlay::celebration_label());
         }
         let celebrate_label = overlay::celebration_label();
+
+        // Project an ETA to the next ratio milestone (ratio tab footer). The
+        // average credited rate is taken from the endpoints of the history ring
+        // (the same cumulative-upload series the graph draws), which smooths the
+        // sparse per-announce jumps. Bail to None on the same guards as the
+        // milestone check: nothing seeding, no positive rate, or the top
+        // milestone already reached.
+        let (eta_next_milestone_secs, next_milestone_label) = {
+            let samples = history::samples();
+            let avg_rate = match (samples.first(), samples.last()) {
+                (Some(&(t0, u0)), Some(&(t1, u1))) if t1 > t0 && u1 > u0 => {
+                    (u1 - u0) as f64 / (t1 - t0) as f64
+                }
+                _ => 0.0,
+            };
+            if total_seeding_len == 0 || avg_rate <= 0.0 {
+                (None, String::new())
+            } else {
+                let ratio_tenths = ((total_up as u128 * 10) / total_seeding_len as u128)
+                    .min(u64::MAX as u128) as u64;
+                match overlay::next_milestone_tenths(ratio_tenths) {
+                    Some(m) => {
+                        let target = (m as u128 * total_seeding_len as u128 / 10) as u64;
+                        let remaining = target.saturating_sub(total_up);
+                        let secs = (remaining as f64 / avg_rate).round().max(0.0) as u64;
+                        (Some(secs), format!("{:.1}×", m as f64 / 10.0))
+                    }
+                    None => (None, String::new()),
+                }
+            }
+        };
+
+        // Tracker rollups for the `g`-toggled aggregated view. Computed from the
+        // rows before they move into the frame; pure, no locks.
+        let tracker_aggs = snapshot::aggregate_trackers(&rows);
+        let trk_aggregated = view::trk_aggregated();
+        // Plausibility linter (`!` overlay). Pure over the rows + the configured
+        // upload cap; resolved here so build_frame only reads the result.
+        let plausibility = snapshot::lint_plausibility(&rows, crate::CONFIG.load().max_upload_rate);
 
         let frame = Frame {
             client: snapshot_client().await,
             started,
             now,
             rows,
+            tracker_aggs,
+            trk_aggregated,
+            plausibility,
             feed: events::snapshot(feed_lines),
             feed_cap: feed_lines,
             term_h: h as usize,
@@ -137,6 +183,8 @@ pub async fn run(mut shutdown: tokio::sync::watch::Receiver<bool>) {
             frame_peak_speed: history::session_peak(),
             celebrate: overlay::celebrating(spinner as u64),
             celebrate_label,
+            eta_next_milestone_secs,
+            next_milestone_label,
             marked: view::marked_set(),
         };
         let s = render::build_frame(&frame, w, active, sel, active_overlay); // pure, no locks/IO

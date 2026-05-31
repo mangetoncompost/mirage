@@ -124,6 +124,22 @@ pub fn queue_clipboard(b64: String) {
     }
 }
 
+/// Pending desktop-notification text. Drained once on the next `paint()` as an
+/// OSC 9 escape, the most widely supported terminal-notification convention
+/// (iTerm2, Ghostty, WezTerm, Windows Terminal). Terminals that do not parse it
+/// ignore the bytes, so this is silent on unsupported terminals and never bells.
+/// Off by default: nothing is queued unless `notify_terminal` is enabled in the
+/// config. See `ui::mod::render_once`.
+static NOTIFY_PENDING: Mutex<Option<String>> = Mutex::new(None);
+
+/// Queue a one-line desktop notification for the next paint. The caller is
+/// responsible for debouncing (so a high-frequency event source never floods).
+pub fn queue_notification(text: String) {
+    if let Ok(mut g) = NOTIFY_PENDING.lock() {
+        *g = Some(text);
+    }
+}
+
 /// One buffered write per frame. `frame` already contains per-line clear-to-EOL,
 /// line breaks, and a trailing clear-below; we only home the cursor, write the
 /// whole string, and flush - a single syscall's worth of I/O.
@@ -139,6 +155,19 @@ pub fn paint(frame: &str) {
     {
         // ESC ] 52 ; c ; <base64> BEL
         let osc = format!("\x1b]52;c;{b64}\x07");
+        let _ = o.write_all(osc.as_bytes());
+    }
+    // Drain the notification queue: emit OSC 9 once if pending. Strip BEL/ESC
+    // from the text so a crafted torrent name can never break out of the escape.
+    if let Ok(mut g) = NOTIFY_PENDING.lock()
+        && let Some(text) = g.take()
+    {
+        let safe: String = text
+            .chars()
+            .filter(|&ch| ch != '\x07' && ch != '\x1b')
+            .collect();
+        // ESC ] 9 ; <text> BEL
+        let osc = format!("\x1b]9;{safe}\x07");
         let _ = o.write_all(osc.as_bytes());
     }
     let _ = o.flush();

@@ -183,6 +183,12 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                         };
                         view::bump_sel(1, max);
                     }
+                    // g toggles the Trackers tab between per-torrent rows and
+                    // aggregated-by-host rollups. Scoped to that tab so it never
+                    // shadows a future global binding.
+                    (KeyCode::Char('g'), _) if active == View::Trackers => {
+                        view::toggle_trk_aggregated();
+                    }
                     // Left/Right (and vim h/l) move between tabs (wraps around).
                     (KeyCode::Right, _) | (KeyCode::Char('l'), _) => view::cycle_view(1),
                     (KeyCode::Left, _) | (KeyCode::Char('h'), _) => view::cycle_view(-1),
@@ -192,6 +198,8 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                     (KeyCode::Char('-' | '_'), _) => speed_edit(active, -1),
                     // Toggle the help overlay.
                     (KeyCode::Char('?'), _) => overlay::toggle_help(),
+                    // Toggle the plausibility linter overlay.
+                    (KeyCode::Char('!'), _) => overlay::toggle_plausibility(),
                     // Open the command palette (F3.1).
                     (KeyCode::Char(':'), _) => overlay::open_palette(),
                     // Enter opens the per-torrent detail card on list views.
@@ -276,6 +284,8 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                             overlay::toggle_help();
                         } else if overlay::palette_open() {
                             overlay::close_palette();
+                        } else if overlay::plausibility_open() {
+                            overlay::toggle_plausibility();
                         } else if overlay::detail_open() {
                             overlay::close_detail();
                         } else {

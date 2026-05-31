@@ -477,6 +477,7 @@ pub fn build_frame(
         Overlay::Palette => build_palette(&mut out, &c, inner, f.term_h, &line),
         Overlay::Detail => build_detail(&mut out, f, &c, &b, inner, &line, &rule),
         Overlay::ConfirmRemove => build_confirm_remove(&mut out, f, &c, &b, inner, &line, &rule),
+        Overlay::Plausibility => build_plausibility(&mut out, f, &c, inner, f.term_h, &line),
         Overlay::None => match view {
             View::Dashboard => build_dash(&mut out, f, &c, &b, inner, sel, &line, &rule),
             View::Torrents => build_tor(&mut out, f, &c, &b, inner, sel, &line, &rule),
@@ -879,9 +880,15 @@ fn build_help(out: &mut String, c: &Caps, inner: usize, term_h: usize, line: &Li
         "[cli] re-init the emulated client (new key)",
     );
     row(&mut scratch, "s", "[cfg] save config.toml");
+    row(
+        &mut scratch,
+        "g",
+        "[trk] toggle per-torrent / by-tracker view",
+    );
     line_s(&mut scratch, "", 0);
     head(&mut scratch, "session");
     row(&mut scratch, "?", "toggle this help");
+    row(&mut scratch, "!", "toggle the plausibility linter");
     row(
         &mut scratch,
         "q / ^C",
@@ -889,6 +896,74 @@ fn build_help(out: &mut String, c: &Caps, inner: usize, term_h: usize, line: &Li
     );
 
     // Clip to fit: header uses 3 rows, footer uses 3 rows - body budget is the rest.
+    let budget = term_h.saturating_sub(6);
+    for segment in scratch.split_inclusive("\r\n").take(budget) {
+        out.push_str(segment);
+    }
+}
+
+// ---- ! : plausibility linter overlay --------------------------------------
+fn build_plausibility(
+    out: &mut String,
+    f: &Frame,
+    c: &Caps,
+    inner: usize,
+    term_h: usize,
+    line: &Line,
+) {
+    use crate::ui::snapshot::PlausibilityLevel;
+    let mut scratch = String::new();
+    let title = format!(
+        "{cy} plausibility linter{r}{d}  (does this look fake to a tracker?){r}",
+        cy = c_header(c),
+        r = c.reset(),
+        d = c_dim(c),
+    );
+    line(
+        &mut scratch,
+        &title,
+        dwidth(" plausibility linter  (does this look fake to a tracker?)"),
+    );
+    line(&mut scratch, "", 0);
+
+    for flag in &f.plausibility {
+        // A colored tag per severity. Ok = green, Suspect = amber, Implausible = red.
+        let (col, tag) = match flag.level {
+            PlausibilityLevel::Ok => (c_ok(c), "ok  "),
+            PlausibilityLevel::Suspect => (c_warn(c), "warn"),
+            PlausibilityLevel::Implausible => (c_warn(c), "BAD "),
+        };
+        let subject = truncate(&flag.subject, 22, c.utf8);
+        let body = format!(
+            "  {col}[{tag}]{r} {cy}{subject:<22}{r} {d}{reason}{r}",
+            col = col,
+            tag = tag,
+            r = c.reset(),
+            cy = c_header(c),
+            subject = subject,
+            d = c_dim(c),
+            reason = flag.reason,
+        );
+        let plain = format!("  [{tag}] {subject:<22} {reason}", reason = flag.reason);
+        line(
+            &mut scratch,
+            &body,
+            dwidth(&plain).min(inner.saturating_sub(2)),
+        );
+    }
+
+    line(&mut scratch, "", 0);
+    line(
+        &mut scratch,
+        &format!(
+            "{d}  thresholds are conservative defaults. ! or Esc to close.{r}",
+            d = c_dim(c),
+            r = c.reset()
+        ),
+        dwidth("  thresholds are conservative defaults. ! or Esc to close."),
+    );
+
+    // Same clip discipline as build_help: header 3 + footer 3 rows reserved.
     let budget = term_h.saturating_sub(6);
     for segment in scratch.split_inclusive("\r\n").take(budget) {
         out.push_str(segment);
@@ -1035,12 +1110,20 @@ fn build_trk(
     term_h: usize,
     line: &Line,
 ) {
+    if f.trk_aggregated {
+        build_trk_aggregated(out, f, c, inner, term_h, line);
+        return;
+    }
     let hdr = format!(
-        "{d} per-torrent trackers (snapshot){r}",
+        "{d} per-torrent trackers (snapshot) - g: by tracker{r}",
         d = c_dim(c),
         r = c.reset()
     );
-    line(out, &hdr, dwidth(" per-torrent trackers (snapshot)"));
+    line(
+        out,
+        &hdr,
+        dwidth(" per-torrent trackers (snapshot) - g: by tracker"),
+    );
     // header(1) + footer(3) = 4 fixed; cap same as dash
     let visible = f
         .rows
@@ -1097,6 +1180,103 @@ fn build_trk(
             out,
             &more,
             dwidth(&format!("(+{} more)…", f.rows.len() - visible)),
+        );
+    }
+}
+
+// Aggregated-by-host Trackers view (`g` toggle). One row per tracker host with
+// summed torrents, upload total, instantaneous speed, S/L and error count.
+fn build_trk_aggregated(
+    out: &mut String,
+    f: &Frame,
+    c: &Caps,
+    inner: usize,
+    term_h: usize,
+    line: &Line,
+) {
+    let hdr = format!(
+        "{d} trackers by host ({n}) - g: per torrent{r}",
+        d = c_dim(c),
+        n = f.tracker_aggs.len(),
+        r = c.reset()
+    );
+    line(
+        out,
+        &hdr,
+        dwidth(&format!(
+            " trackers by host ({}) - g: per torrent",
+            f.tracker_aggs.len()
+        )),
+    );
+    let visible = f
+        .tracker_aggs
+        .len()
+        .min(MAX_VISIBLE_ROWS)
+        .min(term_h.saturating_sub(4));
+    for agg in f.tracker_aggs.iter().take(visible) {
+        // A host with any error torrent gets a warning dot, otherwise an ok dot.
+        let dot = if agg.errors > 0 { c_warn(c) } else { c_ok(c) };
+        let host = truncate(&agg.host, 28, c.utf8);
+        let up = crate::utils::format_bytes_u64(agg.uploaded);
+        let spd = crate::utils::format_bytes(agg.up_speed.min(u32::MAX as u64) as u32);
+        let err = if agg.errors > 0 {
+            format!(
+                "  {w}{e} err{r}",
+                w = c_warn(c),
+                e = agg.errors,
+                r = c.reset()
+            )
+        } else {
+            String::new()
+        };
+        let body = format!(
+            "{dot}●{r} {cy}{host:<28}{r} {n:>2}t  ↑{up:>9}  {spd:>9}/s  {ok}S{s} L{l}{r}{err}",
+            dot = dot,
+            cy = c_header(c),
+            host = host,
+            r = c.reset(),
+            n = agg.torrents,
+            up = up,
+            spd = spd,
+            ok = c_ok(c),
+            s = agg.seeders,
+            l = agg.leechers,
+            err = err,
+        );
+        let plain = format!(
+            "● {host:<28} {n:>2}t  ↑{up:>9}  {spd:>9}/s  S{s} L{l}{err}",
+            host = host,
+            n = agg.torrents,
+            up = up,
+            spd = spd,
+            s = agg.seeders,
+            l = agg.leechers,
+            err = if agg.errors > 0 {
+                format!("  {} err", agg.errors)
+            } else {
+                String::new()
+            },
+        );
+        line(out, &body, dwidth(&plain).min(inner.saturating_sub(2)));
+    }
+    if f.tracker_aggs.len() > visible {
+        let more = format!(
+            "{}(+{} more)…{}",
+            c_dim(c),
+            f.tracker_aggs.len() - visible,
+            c.reset()
+        );
+        line(
+            out,
+            &more,
+            dwidth(&format!("(+{} more)…", f.tracker_aggs.len() - visible)),
+        );
+    }
+    if f.tracker_aggs.is_empty() {
+        line(
+            out,
+            &format!("{d} (no trackers yet){r}", d = c_dim(c), r = c.reset()),
+            dwidth(" (no trackers yet)"),
         );
     }
 }
@@ -1646,6 +1826,9 @@ fn footer_hints(view: View, overlay: crate::ui::overlay::Overlay) -> &'static [&
         Overlay::ConfirmRemove => {
             return &["y confirm · Esc cancel", "y / Esc"];
         }
+        Overlay::Plausibility => {
+            return &["! / Esc close", "Esc close", "Esc"];
+        }
         Overlay::None => {}
     }
     match view {
@@ -2112,17 +2295,83 @@ fn build_detail(
                     }
                 }
                 _ => {
-                    // Wire sub-view - full implementation in F3.2 (needs per-torrent
-                    // last-request/response capture in the announcer).
-                    line(
-                        out,
-                        &format!(
-                            "{d} wire capture not yet available (coming in F3.2){r}",
-                            d = c_dim(c),
-                            r = c.reset()
-                        ),
-                        dwidth(" wire capture not yet available (coming in F3.2)"),
-                    );
+                    match &tv.last_wire {
+                        None => {
+                            let msg = " no announce recorded yet";
+                            line(
+                                out,
+                                &format!("{d}{msg}{r}", d = c_dim(c), r = c.reset()),
+                                dwidth(msg),
+                            );
+                        }
+                        Some(w) => {
+                            // key column width (label + " : " + padding = 12 chars)
+                            const KEY_W: usize = 12;
+                            let val_w = inner.saturating_sub(KEY_W).max(1);
+
+                            kv_row(out, c, inner, line, "proto", w.proto, &c_dim(c));
+
+                            // Wrap req over multiple lines.
+                            let req_chars: Vec<char> = w.req.chars().collect();
+                            let mut start = 0;
+                            let mut first = true;
+                            while start < req_chars.len() || first {
+                                let end = (start + val_w).min(req_chars.len());
+                                let chunk: String = req_chars[start..end].iter().collect();
+                                if first {
+                                    kv_row(out, c, inner, line, "req", &chunk, &c_dim(c));
+                                    first = false;
+                                } else {
+                                    let pad = " ".repeat(KEY_W);
+                                    line(
+                                        out,
+                                        &format!("{d}{pad}{chunk}{r}", d = c_dim(c), r = c.reset()),
+                                        KEY_W + dwidth(&chunk),
+                                    );
+                                }
+                                if end == req_chars.len() {
+                                    break;
+                                }
+                                start = end;
+                            }
+
+                            let status_col = if w.status.starts_with("HTTP 2") || w.status == "OK" {
+                                c_ok(c)
+                            } else {
+                                c_err(c)
+                            };
+                            kv_row(out, c, inner, line, "status", &w.status, &status_col);
+
+                            // Wrap resp over multiple lines.
+                            let resp_str = if w.resp.is_empty() {
+                                "(empty)"
+                            } else {
+                                &w.resp
+                            };
+                            let resp_chars: Vec<char> = resp_str.chars().collect();
+                            let mut start = 0;
+                            let mut first = true;
+                            while start < resp_chars.len() || first {
+                                let end = (start + val_w).min(resp_chars.len());
+                                let chunk: String = resp_chars[start..end].iter().collect();
+                                if first {
+                                    kv_row(out, c, inner, line, "resp", &chunk, &c_dim(c));
+                                    first = false;
+                                } else {
+                                    let pad = " ".repeat(KEY_W);
+                                    line(
+                                        out,
+                                        &format!("{d}{pad}{chunk}{r}", d = c_dim(c), r = c.reset()),
+                                        KEY_W + dwidth(&chunk),
+                                    );
+                                }
+                                if end == resp_chars.len() {
+                                    break;
+                                }
+                                start = end;
+                            }
+                        }
+                    }
                 }
             }
             // Navigation hint - always visible at the bottom of the card.
@@ -2385,6 +2634,21 @@ fn build_ratio(out: &mut String, f: &Frame, c: &Caps, inner: usize, line: &Line)
         crate::utils::format_bytes(peak_speed.min(u32::MAX as u64) as u32)
     ));
     line(out, &summary, vis.min(inner.saturating_sub(2)));
+
+    // ETA to the next ratio milestone, resolved in render_once. Hidden once the
+    // top milestone is reached or before any credited rate exists.
+    if let Some(secs) = f.eta_next_milestone_secs {
+        let plain = format!(" next {} in {}", f.next_milestone_label, fmt_hms(secs));
+        let eta = format!(
+            "{d} next {ok}{m}{d} in {hms}{r}",
+            d = c_dim(c),
+            ok = c_ok(c),
+            m = f.next_milestone_label,
+            hms = fmt_hms(secs),
+            r = c.reset(),
+        );
+        line(out, &eta, dwidth(&plain).min(inner.saturating_sub(2)));
+    }
 }
 
 #[cfg(test)]

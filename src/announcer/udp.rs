@@ -9,7 +9,7 @@ use tracing::{debug, error, info, warn};
 use url::Url;
 
 use crate::CONFIG;
-use crate::torrent::Torrent;
+use crate::torrent::{Torrent, WireCapture};
 use crate::ui::{EventKind, emit};
 
 use super::tracker::Event;
@@ -344,6 +344,14 @@ pub async fn announce_udp(
         port,
     };
 
+    let req_summary = format!(
+        "{url}  up:{} dl:{} left:{} event:{:?}",
+        crate::utils::format_bytes_u64(uploaded),
+        crate::utils::format_bytes_u64(request.downloaded),
+        crate::utils::format_bytes_u64(request.left),
+        event,
+    );
+
     match tracker.announce(&request).await {
         Ok(response) => {
             // Update torrent state on successful announce
@@ -360,6 +368,19 @@ pub async fn announce_udp(
             if event == Some(Event::Completed) {
                 torrent.completed_sent = true;
             }
+
+            torrent.last_wire = Some(WireCapture {
+                proto: "UDP",
+                req: req_summary,
+                status: String::from("OK"),
+                resp: format!(
+                    "interval:{} seeders:{} leechers:{} peers:{}",
+                    response.interval,
+                    response.seeders,
+                    response.leechers,
+                    response.peers.len()
+                ),
+            });
 
             info!(
                 "UDP announce OK: interval={}, seeders={}, leechers={}, peers={}",
@@ -395,6 +416,12 @@ pub async fn announce_udp(
                 format!("UDP fail {url}: {e}"),
             );
             torrent.error_count = torrent.error_count.saturating_add(1);
+            torrent.last_wire = Some(WireCapture {
+                proto: "UDP",
+                req: req_summary,
+                status: format!("error: {e}"),
+                resp: String::new(),
+            });
         }
     }
 }
