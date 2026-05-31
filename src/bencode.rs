@@ -34,6 +34,11 @@ impl From<std::str::Utf8Error> for BencodeDecoderError {
     }
 }
 
+/// The decoded top-level metainfo dictionary plus the raw byte span
+/// `(start, end)` of the `info` value (None if no `info` key). Returned by
+/// [`BencodeDecoder::decode_top_level_with_info_span`].
+pub type TopLevelWithInfoSpan = (BTreeMap<Vec<u8>, BencodeValue>, Option<(usize, usize)>);
+
 /// Maximum container nesting depth. Real torrents / announce responses are
 /// shallow (a few levels); a deeply-nested `llll…` body from a malicious tracker
 /// or crafted .torrent would otherwise recurse until the thread stack overflows
@@ -167,11 +172,69 @@ impl<'a> BencodeDecoder<'a> {
                 _ => return Err(BencodeDecoderError::InvalidFormat), // Key is not a string
             };
             let value = self.decode()?; // Recursive call
+            // Reject duplicate keys: a compliant encoder never emits them, and
+            // silently keeping the last would let a crafted torrent normalize
+            // into a hash a real client never produces.
+            if dict.contains_key(&key) {
+                return Err(BencodeDecoderError::InvalidFormat);
+            }
             dict.insert(key, value);
         }
         self.consume_byte(); // Consume 'e'
         self.depth -= 1;
         Ok(BencodeValue::Dictionary(dict))
+    }
+
+    /// Decode the top-level metainfo dictionary AND return the raw byte span
+    /// `(start, end)` of the value bound to the `info` key, if present.
+    ///
+    /// The info_hash must be the SHA-1 of the EXACT source bytes of the info
+    /// dictionary, not a re-encode: decoding into a `BTreeMap` re-sorts keys and
+    /// canonicalizes integers, so re-encoding can produce a different byte string
+    /// (and thus the wrong hash) for any non-canonical but valid `.torrent`.
+    /// Capturing the source span lets the caller hash the original bytes.
+    ///
+    /// Errors if the top level is not a dictionary, a key is not a byte string,
+    /// or a key is duplicated (same rules as `decode_dictionary`).
+    pub fn decode_top_level_with_info_span(
+        &mut self,
+    ) -> Result<TopLevelWithInfoSpan, BencodeDecoderError> {
+        if self.peek_byte() != Some(b'd') {
+            return Err(BencodeDecoderError::InvalidFormat);
+        }
+        self.depth += 1;
+        self.consume_byte(); // Consume 'd'
+        let mut dict = BTreeMap::new();
+        let mut info_span: Option<(usize, usize)> = None;
+        while self
+            .peek_byte()
+            .ok_or(BencodeDecoderError::UnexpectedEndOfInput)?
+            != b'e'
+        {
+            let key = match self.decode_byte_string()? {
+                BencodeValue::ByteString(b) => b,
+                _ => return Err(BencodeDecoderError::InvalidFormat),
+            };
+            let value_start = self.position;
+            let value = self.decode()?;
+            let value_end = self.position;
+            if key == b"info" {
+                info_span = Some((value_start, value_end));
+            }
+            if dict.contains_key(&key) {
+                return Err(BencodeDecoderError::InvalidFormat);
+            }
+            dict.insert(key, value);
+        }
+        self.consume_byte(); // Consume 'e'
+        self.depth -= 1;
+        Ok((dict, info_span))
+    }
+
+    /// Current byte offset into the input. Used to detect trailing garbage after
+    /// a top-level value has been fully decoded.
+    pub fn position(&self) -> usize {
+        self.position
     }
 }
 
@@ -198,10 +261,34 @@ mod depth_tests {
         let mut dec = BencodeDecoder::new(data);
         assert!(dec.decode().is_ok());
     }
+
+    #[test]
+    fn info_span_points_at_source_bytes() {
+        // d4:infod3:foo3:bare4:morei1ee  -> info value is "d3:foo3:bare"
+        let data = b"d4:infod3:foo3:bare4:morei1ee";
+        let mut dec = BencodeDecoder::new(data);
+        let (dict, span) = dec.decode_top_level_with_info_span().unwrap();
+        assert!(dict.contains_key(b"info".as_ref()));
+        let (s, e) = span.expect("info span present");
+        assert_eq!(&data[s..e], b"d3:foo3:bare");
+        assert_eq!(dec.position(), data.len(), "whole input consumed");
+    }
+
+    #[test]
+    fn duplicate_keys_rejected() {
+        // d3:fooi1e3:fooi2ee has a duplicate key.
+        let data = b"d3:fooi1e3:fooi2ee";
+        let mut dec = BencodeDecoder::new(data);
+        assert!(matches!(
+            dec.decode(),
+            Err(BencodeDecoderError::InvalidFormat)
+        ));
+    }
 }
 
-// This is needed because our simple decoder doesn't give us the raw byte range of the 'info' dict.
-// A more advanced parser might store byte ranges during parsing.
+// `decode_top_level_with_info_span` captures the raw byte range of the info dict
+// during parsing, so the info_hash is taken from the source bytes. This encoder
+// remains only as a fallback and for round-trip use.
 pub fn encode_bencode_value(
     value: &BencodeValue,
     buffer: &mut Vec<u8>,

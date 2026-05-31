@@ -557,14 +557,15 @@ impl Torrent {
     /// A `Result` which is `Ok(Torrent)` on success or `Err(TorrentError)` on failure.
     pub fn from_bencode_bytes(bencode_data: &[u8]) -> Result<Self, TorrentError> {
         let mut decoder = BencodeDecoder::new(bencode_data);
-        let top_level_dict = match decoder.decode()? {
-            BencodeValue::Dictionary(dict) => dict,
-            _ => {
-                return Err(TorrentError::InvalidFieldType(
-                    "Top-level is not a dictionary",
-                ));
-            }
-        };
+        let (top_level_dict, info_span) = decoder.decode_top_level_with_info_span()?;
+        // Reject trailing bytes after the metainfo dict: a valid .torrent is a
+        // single top-level dictionary and nothing else. Silently ignoring a tail
+        // would let a crafted file smuggle bytes past the parser.
+        if decoder.position() != bencode_data.len() {
+            return Err(TorrentError::ParseError(
+                "trailing data after metainfo dictionary".to_string(),
+            ));
+        }
 
         // --- Extract announce URLs ---
         let mut urls = Vec::new();
@@ -620,11 +621,20 @@ impl Torrent {
             _ => return Err(TorrentError::InvalidFieldType("info is not a dictionary")),
         };
 
-        let mut encoder_buf = Vec::new();
-        // Pass the reference to the info dictionary directly to the encoder.
-        // `info_bytes_slice` is already `&BencodeValue`.
-        encode_bencode_value(info_bytes_slice, &mut encoder_buf)?;
-        let info_bencoded_raw = encoder_buf;
+        // Hash the EXACT source bytes of the info dictionary, captured during
+        // decode. Re-encoding the parsed dict would re-sort keys and canonicalize
+        // integers, producing the wrong hash for any non-canonical (but valid)
+        // .torrent, which makes the tracker reject every announce and the torrent
+        // silently never earns ratio. Fall back to re-encoding only if the span
+        // is somehow absent (it never is when `info` exists).
+        let info_bencoded_raw: Vec<u8> = match info_span {
+            Some((start, end)) => bencode_data[start..end].to_vec(),
+            None => {
+                let mut buf = Vec::new();
+                encode_bencode_value(info_bytes_slice, &mut buf)?;
+                buf
+            }
+        };
 
         let info_hash: [u8; 20] = get_sha1(&info_bencoded_raw);
         let info_hash_urlencoded = percent_encoding(&info_hash);
@@ -742,6 +752,43 @@ impl Torrent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn info_hash_uses_source_bytes_not_reencode() {
+        // A valid .torrent whose info dict keys are NOT byte-sorted: "name"
+        // appears before "length". Re-encoding would sort to
+        // "d6:lengthi3e4:name3:fooe" and hash the wrong bytes. The parser must
+        // hash the SOURCE info span "d4:name3:foo6:lengthi3e".
+        let announce = b"announce";
+        let info_src = b"d4:name3:foo6:lengthi3ee";
+        let mut data = Vec::new();
+        data.extend_from_slice(b"d");
+        // "announce" key + value (a supported http url)
+        data.extend_from_slice(b"8:announce");
+        let url = b"http://t.example/announce";
+        data.extend_from_slice(format!("{}:", url.len()).as_bytes());
+        data.extend_from_slice(url);
+        let _ = announce;
+        // "info" key + the non-canonical info dict (verbatim)
+        data.extend_from_slice(b"4:info");
+        data.extend_from_slice(info_src);
+        data.extend_from_slice(b"e");
+
+        let t = Torrent::from_bencode_bytes(&data).expect("parses");
+        let expected = crate::utils::get_sha1(info_src);
+        assert_eq!(
+            t.info_hash, expected,
+            "info_hash must be SHA-1 of the source info bytes, not a re-encode"
+        );
+    }
+
+    #[test]
+    fn trailing_garbage_is_rejected() {
+        let mut data =
+            b"d8:announce25:http://t.example/announce4:infod6:lengthi3e4:name3:fooee".to_vec();
+        data.extend_from_slice(b"junk");
+        assert!(Torrent::from_bencode_bytes(&data).is_err());
+    }
 
     #[test]
     fn sanitize_name_strips_control_chars_keeps_unicode() {
