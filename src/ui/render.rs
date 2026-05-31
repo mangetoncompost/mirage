@@ -796,109 +796,152 @@ fn build_dash(
 
 // ---- ? : help overlay (full keymap) ---------------------------------------
 fn build_help(out: &mut String, c: &Caps, inner: usize, term_h: usize, line: &Line) {
-    // Build into a scratch buffer first, then copy only as many \r\n-delimited
-    // lines as fit the body budget (term_h - 3 header rows - 3 footer rows).
-    let mut scratch = String::new();
-    let line_s = |s: &mut String, content: &str, vis: usize| line(s, content, vis);
-    let head = |s: &mut String, t: &str| {
-        line_s(
-            s,
-            &format!("{cy} {t}{r}", cy = c_header(c), t = t, r = c.reset()),
-            dwidth(t) + 1,
-        );
-    };
-    let row = |s: &mut String, key: &str, desc: &str| {
-        let txt = format!(
-            "   {cy}{key:<10}{r}{d}{desc}{r}",
-            cy = c_header(c),
-            key = key,
-            r = c.reset(),
-            d = c_dim(c),
-            desc = desc
-        );
-        line_s(
-            s,
-            &txt,
-            (3 + 10 + dwidth(desc)).min(inner.saturating_sub(2)),
-        );
-    };
-    line_s(&mut scratch, "", 0);
-    head(&mut scratch, "navigation");
-    row(&mut scratch, "1-9 / 0", "jump to tab (0 = ratio graph)");
-    row(&mut scratch, "← → / h l", "previous / next tab");
-    row(
-        &mut scratch,
-        "↑ ↓ / k j",
-        "[list] select row · [spd] select setting",
-    );
-    row(
-        &mut scratch,
-        "↑ ↓",
-        "upload multiplier (on non-list tabs only)",
-    );
-    row(
-        &mut scratch,
-        "Enter",
-        "open detail card for selected torrent",
-    );
-    row(&mut scratch, "Esc", "back to dashboard (or close overlay)");
-    line_s(&mut scratch, "", 0);
-    head(&mut scratch, "actions");
-    row(&mut scratch, "p", "pause / resume all uploads (global)");
-    row(&mut scratch, "r", "resume all uploads");
-    row(&mut scratch, "f", "force-announce selected (or all marked)");
-    row(
-        &mut scratch,
-        "x",
-        "remove selected/marked (asks y/Esc to confirm)",
-    );
-    row(
-        &mut scratch,
-        "Space",
-        "toggle mark on selected row (multi-select)",
-    );
-    row(&mut scratch, "a / A", "mark all visible / clear all marks");
-    row(&mut scratch, "e", "export snapshot to JSON (+ clipboard)");
-    row(
-        &mut scratch,
-        "+ -",
-        "edit selected setting on the Speeds tab",
-    );
-    line_s(&mut scratch, "", 0);
-    head(&mut scratch, "overlays");
-    row(
-        &mut scratch,
-        ":",
-        "open command palette (fuzzy search all actions)",
-    );
-    row(&mut scratch, "i / w", "[detail] info / wire sub-tab");
-    line_s(&mut scratch, "", 0);
-    head(&mut scratch, "tabs");
-    row(
-        &mut scratch,
-        "k",
-        "[cli] re-init the emulated client (new key)",
-    );
-    row(&mut scratch, "s", "[cfg] save config.toml");
-    row(
-        &mut scratch,
-        "g",
-        "[trk] toggle per-torrent / by-tracker view",
-    );
-    line_s(&mut scratch, "", 0);
-    head(&mut scratch, "session");
-    row(&mut scratch, "?", "toggle this help");
-    row(&mut scratch, "!", "toggle the plausibility linter");
-    row(
-        &mut scratch,
-        "q / ^C",
-        "quit (announces stopped, saves state)",
-    );
+    // The full keymap is taller than a short window (the macOS app opens at
+    // 92x28), so a single column gets clipped. Lay the sections out in two
+    // columns when the window is wide enough, falling back to one column on a
+    // narrow terminal. Sections are kept whole (never split across columns).
+    type Section = (&'static str, &'static [(&'static str, &'static str)]);
+    const SECTIONS: &[Section] = &[
+        (
+            "navigation",
+            &[
+                ("1-9 / 0", "jump to tab (0 = ratio graph)"),
+                ("← → / h l", "previous / next tab"),
+                ("↑ ↓ / k j", "[list] row · [spd] setting"),
+                ("↑ ↓", "upload multiplier (non-list)"),
+                ("Enter", "open detail card for selected"),
+                ("Esc", "back to dashboard / close overlay"),
+            ],
+        ),
+        (
+            "actions",
+            &[
+                ("p", "pause / resume all uploads"),
+                ("r", "resume all uploads"),
+                ("f", "force-announce selected/marked"),
+                ("x", "remove selected/marked (y/Esc)"),
+                ("Space", "toggle mark on selected row"),
+                ("a / A", "mark all visible / clear marks"),
+                ("e", "export snapshot to JSON (+ clip)"),
+                ("+ -", "edit setting on the Speeds tab"),
+            ],
+        ),
+        (
+            "overlays",
+            &[
+                (":", "command palette (fuzzy search)"),
+                ("i / w", "[detail] info / wire sub-tab"),
+            ],
+        ),
+        (
+            "tabs",
+            &[
+                ("k", "[cli] re-init client (new key)"),
+                ("s", "[cfg] save config.toml"),
+                ("g", "[trk] per-torrent / by-tracker"),
+            ],
+        ),
+        (
+            "session",
+            &[
+                ("?", "toggle this help"),
+                ("!", "toggle the plausibility linter"),
+                ("q / ^C", "quit (announces stopped)"),
+            ],
+        ),
+    ];
 
-    // Clip to fit: header uses 3 rows, footer uses 3 rows - body budget is the rest.
+    // Render one section into a Vec of (ansi, visible_width) lines: a colored
+    // header then "  KEY  desc" rows with the key column padded to KEY_W cells.
+    const KEY_W: usize = 10;
+    let render_section = |sec: &Section| -> Vec<(String, usize)> {
+        let mut lines: Vec<(String, usize)> = Vec::new();
+        let (title, rows) = sec;
+        lines.push((
+            format!("{cy}{t}{r}", cy = c_header(c), t = title, r = c.reset()),
+            dwidth(title),
+        ));
+        for (key, desc) in rows.iter() {
+            let kw = dwidth(key);
+            let pad = KEY_W.saturating_sub(kw);
+            let ansi = format!(
+                "  {cy}{key}{r}{sp}{d}{desc}{r}",
+                cy = c_header(c),
+                key = key,
+                r = c.reset(),
+                sp = " ".repeat(pad),
+                d = c_dim(c),
+                desc = desc,
+            );
+            lines.push((ansi, 2 + kw + pad + dwidth(desc)));
+        }
+        lines
+    };
+
+    // Go two-column once the body is wide enough for two readable columns. The
+    // macOS app opens at 92 cols (inner ~88), so the threshold sits below that;
+    // the column width is derived from the actual inner width and a content cell
+    // is clamped to it by the shared `line` measurement, so a long description
+    // is trimmed rather than overflowing.
+    const GUTTER: usize = 2;
+    let two_col = inner >= 76;
+    let col_w = if two_col {
+        (inner.saturating_sub(GUTTER)) / 2
+    } else {
+        inner
+    };
+
+    // Build the column buffers. In two-column mode, greedily fill the left
+    // column with whole sections up to half the total height, then the rest go
+    // right; this keeps related keys together and balances the columns.
+    let rendered: Vec<Vec<(String, usize)>> = SECTIONS.iter().map(&render_section).collect();
+    let total_lines: usize = rendered.iter().map(|s| s.len() + 1).sum(); // +1 blank between
+
+    let mut left: Vec<(String, usize)> = Vec::new();
+    let mut right: Vec<(String, usize)> = Vec::new();
+    if two_col {
+        let half = total_lines / 2;
+        let mut acc = 0usize;
+        for sec in &rendered {
+            if acc < half || left.is_empty() {
+                if !left.is_empty() {
+                    left.push((String::new(), 0));
+                }
+                left.extend(sec.iter().cloned());
+                acc += sec.len() + 1;
+            } else {
+                if !right.is_empty() {
+                    right.push((String::new(), 0));
+                }
+                right.extend(sec.iter().cloned());
+            }
+        }
+    } else {
+        for (i, sec) in rendered.iter().enumerate() {
+            if i > 0 {
+                left.push((String::new(), 0));
+            }
+            left.extend(sec.iter().cloned());
+        }
+    }
+
+    // Compose rows: zip the two columns, padding the left cell to col_w cells so
+    // the right column aligns. The left cell is clamped to col_w first so a long
+    // description never shoves the right column past the border. The shared
+    // `line` closure measures visible width itself, so the border lands right.
     let budget = term_h.saturating_sub(6);
-    for segment in scratch.split_inclusive("\r\n").take(budget) {
-        out.push_str(segment);
+    line(out, "", 0);
+    let rows = left.len().max(right.len());
+    for i in 0..rows.min(budget.saturating_sub(1)) {
+        let (l_ansi, l_vis) = left.get(i).cloned().unwrap_or((String::new(), 0));
+        if let Some((r_ansi, r_vis)) = right.get(i).filter(|_| two_col) {
+            let (l_clamped, l_vis) = clamp_visible(&l_ansi, col_w, c.color);
+            let pad = (col_w + GUTTER).saturating_sub(l_vis);
+            let composed = format!("{l_clamped}{sp}{r_ansi}", sp = " ".repeat(pad));
+            line(out, &composed, l_vis + pad + r_vis);
+        } else {
+            line(out, &l_ansi, l_vis);
+        }
     }
 }
 
