@@ -52,15 +52,17 @@ accept no liability. Use at your own risk.
 
 ```
 cargo install mirage-tui          # or grab a binary from the releases page
-mkdir -p torrents                 # default torrent directory
-cp your.torrent torrents/
-mirage                            # reads torrents/ in the current directory
+cp your.torrent ~/Downloads/Mirage/   # default torrent directory
+mirage
 ```
 
-Mirage loads every `.torrent` from the `torrents/` subdirectory of the current
-directory, picks a client to emulate (`auto` detects your local Transmission),
-and opens the live dashboard. No config file is required; see
-[Configuration](#configuration) to tune the defaults.
+Mirage loads every `.torrent` from its torrent directory. The default is
+`~/Downloads/Mirage` (an absolute path, so it is the same folder however you
+launch Mirage: terminal, Launchpad, or the macOS app). It picks a client to
+emulate (`auto` detects your local Transmission) and opens the live dashboard.
+The dashboard prints the exact directory on first run when it is empty, so you
+always know where to drop files. No config file is required; see
+[Configuration](#configuration) to set a different `torrent_dir`.
 
 ## How it works
 
@@ -251,8 +253,10 @@ max_download_rate = 16777216  # 16 MiB/s
 numwant = 80
 
 # Directory to watch for .torrent files.
-# Defaults to "torrents" (relative to the launch directory). Override with the
-# TORRENT_DIR environment variable or this key.
+# Defaults to ~/Downloads/Mirage. A relative value here is resolved against this
+# config file's directory, not the launch directory, so the path is stable no
+# matter how Mirage is started. Override with the TORRENT_DIR environment
+# variable or this key.
 torrent_dir = "/path/to/torrents"
 
 # Write a PID file to the XDG runtime directory (mirage.pid).
@@ -308,9 +312,9 @@ effect and log output does not corrupt the alternate screen.
 
 ## Torrent management
 
-Place `.torrent` files in `torrent_dir` (default `torrents/`). Mirage scans that
-directory at startup and loads every `.torrent` it finds. Torrents with no
-supported tracker URL are skipped.
+Place `.torrent` files in `torrent_dir` (default `~/Downloads/Mirage`). Mirage
+scans that directory at startup and loads every `.torrent` it finds. Torrents
+with no supported tracker URL are skipped.
 
 When the directory is empty, the dashboard still opens and shows an onboarding
 hint pointing at the watch directory; drop a `.torrent` in and the file watcher

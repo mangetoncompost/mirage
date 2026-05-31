@@ -15,6 +15,33 @@ use crate::transmission;
 /// re-store it. The UDP path uses client.key (u32); both serialize the SAME key.
 pub static KEY_HEX: Lazy<ArcSwap<String>> = Lazy::new(|| ArcSwap::from_pointee(String::new()));
 
+/// Visible, user-facing default folder for `.torrent` files: `~/Downloads/Mirage`.
+/// Absolute, so it resolves to the same place no matter the working directory the
+/// process was launched from (terminal cwd, Finder/`Mirage.app`, etc.). Falls back
+/// to a bare relative `Mirage` only if `$HOME` is unset, which never happens on a
+/// normal desktop session.
+pub fn default_torrent_dir() -> PathBuf {
+    match std::env::var_os("HOME") {
+        Some(home) => PathBuf::from(home).join("Downloads").join("Mirage"),
+        None => PathBuf::from("Mirage"),
+    }
+}
+
+/// Resolve a configured path against the config file's directory when it is
+/// relative. A relative path in a config file means "next to the config", never
+/// "next to wherever the process happened to start". Absolute paths pass through
+/// unchanged. This is what keeps `cargo run` (cwd = repo) and `Mirage.app`
+/// (cwd = home) reading the exact same folder.
+fn anchor_to_config(config_path: &std::path::Path, value: PathBuf) -> PathBuf {
+    if value.is_absolute() {
+        return value;
+    }
+    match config_path.parent() {
+        Some(dir) => dir.join(value),
+        None => value,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     /// torrent port
@@ -33,7 +60,8 @@ pub struct Config {
     pub numwant: Option<u16>,
     // pub simultaneous_seed: u16, //useful ?
     pub client: String,
-    /// Directory where torrents are saved. Default is in the working directory.
+    /// Directory scanned for `.torrent` files. Resolved to an absolute path
+    /// (default `~/Downloads/Mirage`) so it does not depend on the launch cwd.
     pub torrent_dir: PathBuf,
     // pub key_refresh_every: u16,
     /// Output file path for the JSON file.
@@ -66,7 +94,7 @@ impl Default for Config {
             numwant: None,
             torrent_dir: std::env::var("TORRENT_DIR")
                 .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("torrents")),
+                .unwrap_or_else(|_| default_torrent_dir()),
             //client: fake_torrent_client::Client::from(fake_torrent_client::clients::ClientVersion::Qbittorrent_4_4_2),
             // key_refresh_every: 0,
             // "auto" detects & faithfully emulates the locally installed
@@ -250,6 +278,13 @@ impl Config {
             std::mem::swap(&mut config.min_download_rate, &mut config.max_download_rate);
         }
 
+        // Make file-relative paths absolute, anchored to the config's own
+        // directory. Without this, a relative `torrent_dir` resolves against the
+        // process working directory, which differs between a terminal launch and
+        // Mirage.app (cwd = home), so the two would read different folders.
+        config.torrent_dir = anchor_to_config(path, config.torrent_dir);
+        config.output_stats = config.output_stats.map(|p| anchor_to_config(path, p));
+
         config
     }
 
@@ -315,7 +350,8 @@ pub fn ensure_client_key(client: &mut fake_torrent_client::Client) {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::Config;
+    use crate::config::{Config, anchor_to_config, default_torrent_dir};
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn test_speed_ok() {
@@ -329,5 +365,33 @@ mod tests {
         cfg.min_upload_rate = 8192;
         cfg.max_upload_rate = 4096;
         assert!(!cfg.speeds_ok());
+    }
+
+    #[test]
+    fn relative_torrent_dir_anchors_to_config_dir() {
+        let cfg = Path::new("/home/u/.config/Mirage/config.toml");
+        // A relative value resolves next to the config file, not the cwd.
+        assert_eq!(
+            anchor_to_config(cfg, PathBuf::from("torrents")),
+            PathBuf::from("/home/u/.config/Mirage/torrents")
+        );
+    }
+
+    #[test]
+    fn absolute_torrent_dir_passes_through() {
+        let cfg = Path::new("/home/u/.config/Mirage/config.toml");
+        let abs = PathBuf::from("/data/torrents");
+        assert_eq!(anchor_to_config(cfg, abs.clone()), abs);
+    }
+
+    #[test]
+    fn default_torrent_dir_is_absolute_under_home() {
+        // The visible default must be absolute so it is cwd-independent.
+        // Guarded on HOME being set, which it is in the test runner.
+        if std::env::var_os("HOME").is_some() {
+            let dir = default_torrent_dir();
+            assert!(dir.is_absolute());
+            assert!(dir.ends_with("Downloads/Mirage"));
+        }
     }
 }

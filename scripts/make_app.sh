@@ -38,19 +38,15 @@ cat > "$APP/Contents/MacOS/Mirage" <<'LAUNCHER'
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BIN="$HERE/mirage-bin"
 
-# Working dir = where the torrents live, so a relative torrent_dir (default ".")
-# resolves correctly. Order: $MIRAGE_TORRENT_DIR, else torrent_dir from the XDG
-# config, else $HOME.
-CFG="${XDG_CONFIG_HOME:-$HOME/.config}/Mirage/config.toml"
-WORKDIR="${MIRAGE_TORRENT_DIR:-}"
-if [[ -z "$WORKDIR" && -f "$CFG" ]]; then
-  WORKDIR="$(sed -n 's/^[[:space:]]*torrent_dir[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$CFG" | head -1)"
-fi
-[[ -z "$WORKDIR" || ! -d "$WORKDIR" ]] && WORKDIR="$HOME"
+# Mirage resolves its torrent_dir to an absolute path itself (a relative value in
+# the config is anchored to the config's directory, and the default is
+# ~/Downloads/Mirage), so the launcher's working directory no longer decides
+# which torrents load. We still cd to $HOME for a stable, always-present cwd.
+WORKDIR="$HOME"
 
-# Open a Terminal window running Mirage in that dir. `exec` makes Mirage the
-# controlling process, so closing the window delivers SIGHUP and Mirage shuts
-# down cleanly (announce stopped + state saved + terminal restored).
+# Open a Terminal window running Mirage. `exec` makes Mirage the controlling
+# process, so closing the window delivers SIGHUP and Mirage shuts down cleanly
+# (announce stopped + state saved + terminal restored).
 #
 # If Terminal is launched fresh, it auto-opens one empty window - running
 # `do script` then would leave TWO windows (the empty one + ours). So we detect
