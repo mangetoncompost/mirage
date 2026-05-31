@@ -251,7 +251,8 @@ max_download_rate = 16777216  # 16 MiB/s
 numwant = 80
 
 # Directory to watch for .torrent files.
-# Defaults to "." (current working directory at launch).
+# Defaults to "torrents" (relative to the launch directory). Override with the
+# TORRENT_DIR environment variable or this key.
 torrent_dir = "/path/to/torrents"
 
 # Write a PID file to the XDG runtime directory (mirage.pid).
@@ -307,9 +308,14 @@ effect and log output does not corrupt the alternate screen.
 
 ## Torrent management
 
-Place `.torrent` files in `torrent_dir`. Mirage scans that directory at startup
-and loads every `.torrent` it finds. Torrents with no supported tracker URL are
-skipped.
+Place `.torrent` files in `torrent_dir` (default `torrents/`). Mirage scans that
+directory at startup and loads every `.torrent` it finds. Torrents with no
+supported tracker URL are skipped.
+
+When the directory is empty, the dashboard still opens and shows an onboarding
+hint pointing at the watch directory; drop a `.torrent` in and the file watcher
+loads it without a restart. In non-interactive mode (piped output or
+`MIRAGE_NO_UI`), Mirage prints where it looked and exits instead.
 
 The filesystem watcher monitors the directory while Mirage is running. Dropping
 a new `.torrent` file into the directory triggers a `Started` announce and adds

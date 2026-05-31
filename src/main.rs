@@ -170,10 +170,28 @@ async fn main() {
     }
 
     directory::prepare_torrent_folder(config.torrent_dir.clone()).await;
+    let torrent_dir = config.torrent_dir.clone();
     let count = directory::load_torrents(config.torrent_dir).await;
     if count == 0 {
-        info!("No torrent, exiting");
-        return;
+        // In TUI mode, keep running on an empty list: the dashboard shows a
+        // first-run onboarding hint and the watcher hot-loads any .torrent
+        // dropped into torrent_dir, so a new user is never met with a window
+        // that opens and closes instantly. In non-TUI mode there is nothing to
+        // show and no key thread to add torrents, so exit with a clear message
+        // on stderr (tracing is silent in TUI mode, hence the explicit print).
+        if !tui {
+            eprintln!(
+                "No torrents found in {}. Drop a .torrent file there, or set \
+                 torrent_dir in your config (or the TORRENT_DIR env var), then \
+                 run again.",
+                torrent_dir.display()
+            );
+            return;
+        }
+        info!(
+            "No torrent yet; starting dashboard, watching {}",
+            torrent_dir.display()
+        );
     }
     let mut pid_file: Option<PathBuf> = None;
     if config.use_pid_file {
