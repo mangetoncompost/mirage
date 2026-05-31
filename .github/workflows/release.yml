@@ -36,7 +36,7 @@ jobs:
         run: cp target/x86_64-unknown-linux-musl/release/mirage mirage-linux-x86_64
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: mirage-linux-x86_64
           path: mirage-linux-x86_64
@@ -72,7 +72,7 @@ jobs:
         run: cp target/${{ matrix.target }}/release/mirage mirage-${{ matrix.suffix }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: mirage-${{ matrix.suffix }}
           path: mirage-${{ matrix.suffix }}
@@ -100,7 +100,7 @@ jobs:
         run: cp target/release/mirage.exe mirage-windows-x86_64.exe
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: mirage-windows-x86_64.exe
           path: mirage-windows-x86_64.exe
@@ -137,7 +137,7 @@ jobs:
         run: zip -r Mirage.app.zip Mirage.app
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: Mirage.app.zip
           path: Mirage.app.zip
