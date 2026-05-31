@@ -14,7 +14,7 @@ use crate::utils::{get_sha1, percent_encoding};
 /// (display) and the announce path (declared integral). The UP/DOWN arrow keys
 /// walk this array and saturate at the ends; index 2 (== 1.0) is the default.
 ///
-/// INVARIANT — coherence ceiling: the top step (8.0) is the ONLY ceiling. We do
+/// INVARIANT - coherence ceiling: the top step (8.0) is the ONLY ceiling. We do
 /// NOT add a separate per-frame clamp in `speed_at`, because `integrate` has no
 /// matching clamp; a clamp in one but not the other would break the
 /// "declared bytes == area under the displayed curve" identity. Multiplying both
@@ -161,7 +161,7 @@ pub struct Torrent {
     /// failed announce while never double-sending it after success.
     pub completed_sent: bool,
     /// Optional cap on declared uploaded bytes (F2.2). When `uploaded >= target`,
-    /// `can_upload()` returns false and the torrent is silently capped — the
+    /// `can_upload()` returns false and the torrent is silently capped - the
     /// tracker never sees more than the goal. Persisted in state.json v2.
     /// `None` = no cap (unlimited).
     pub upload_target: Option<u64>,
@@ -244,7 +244,7 @@ impl Torrent {
     }
 
     /// Tells if we can declare upload: only once we are SEEDING (finished the
-    /// simulated download — you cannot upload a file you never downloaded) AND
+    /// simulated download - you cannot upload a file you never downloaded) AND
     /// the swarm has leechers to serve. This single gate cascades: speed_at and
     /// integrate early-return 0 when !can_upload(), so a Downloading torrent
     /// declares uploaded=0 everywhere automatically.
@@ -389,7 +389,7 @@ impl Torrent {
 
     /// Closed-form integral of `speed_at` over [t0, t1], in BYTES.
     /// ∫ A·sin(ω·t + φ) dt = -(A/ω)·cos(ω·t + φ), so this is exact for any
-    /// window length and any fractional endpoints — no history buffer, no
+    /// window length and any fractional endpoints - no history buffer, no
     /// per-step error. Returns 0 for empty/degenerate windows (and NaN).
     pub fn integrate(&self, t0: f64, t1: f64) -> f64 {
         if !self.can_upload() || t1 <= t0 {
@@ -409,7 +409,7 @@ impl Torrent {
         // Same global multiplier as `speed_at`, applied to the whole window. A
         // linear factor commutes with integration, so declared bytes == area
         // under the displayed (scaled) curve. The factor in force when integrate()
-        // runs (announce time) scales the whole window — not applied retroactively
+        // runs (announce time) scales the whole window - not applied retroactively
         // per keypress; the bounded one-window discrepancy is accepted.
         area * speed_multiplier()
     }
@@ -766,11 +766,13 @@ mod tests {
 
     #[test]
     fn test_speed_curve_integral_matches_trapezoid_and_bounds() {
-        // CONFIG is a global OnceCell; set it once (tolerate "already set" — we
+        // CONFIG is a global OnceCell; set it once (tolerate "already set" - we
         // read min/max back from whatever won the race).
-        let mut cfg = crate::config::Config::default();
-        cfg.min_upload_rate = 1_048_576; // 1 MiB/s
-        cfg.max_upload_rate = 10_485_760; // 10 MiB/s
+        let cfg = crate::config::Config {
+            min_upload_rate: 1_048_576,  // 1 MiB/s
+            max_upload_rate: 10_485_760, // 10 MiB/s
+            ..crate::config::Config::default()
+        };
         crate::CONFIG.store(std::sync::Arc::new(cfg));
         let cfg = crate::CONFIG.load();
         let (min, max) = (cfg.min_upload_rate as f64, cfg.max_upload_rate as f64);

@@ -37,7 +37,7 @@ impl From<std::str::Utf8Error> for BencodeDecoderError {
 /// Maximum container nesting depth. Real torrents / announce responses are
 /// shallow (a few levels); a deeply-nested `llll…` body from a malicious tracker
 /// or crafted .torrent would otherwise recurse until the thread stack overflows
-/// and ABORTS the process (uncatchable — bypasses the panic hook, stranding the
+/// and ABORTS the process (uncatchable - bypasses the panic hook, stranding the
 /// alternate screen). 32 is far beyond any legitimate structure.
 const MAX_DEPTH: usize = 32;
 
@@ -183,7 +183,7 @@ mod depth_tests {
     fn deeply_nested_lists_are_rejected_not_overflowed() {
         // 100_000 nested 'l' would overflow the stack without the depth cap.
         let mut data = vec![b'l'; 100_000];
-        data.extend(std::iter::repeat(b'e').take(100_000));
+        data.extend(std::iter::repeat_n(b'e', 100_000));
         let mut dec = BencodeDecoder::new(&data);
         assert!(
             matches!(dec.decode(), Err(BencodeDecoderError::InvalidFormat)),
@@ -193,7 +193,7 @@ mod depth_tests {
 
     #[test]
     fn shallow_structures_still_decode() {
-        // d3:fooli1ei2eee  → {"foo": [1, 2]} — well within the cap.
+        // d3:fooli1ei2eee  → {"foo": [1, 2]} - well within the cap.
         let data = b"d3:fooli1ei2eee";
         let mut dec = BencodeDecoder::new(data);
         assert!(dec.decode().is_ok());

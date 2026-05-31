@@ -48,7 +48,7 @@ fi
 # controlling process, so closing the window delivers SIGHUP and Mirage shuts
 # down cleanly (announce stopped + state saved + terminal restored).
 #
-# If Terminal is launched fresh, it auto-opens one empty window — running
+# If Terminal is launched fresh, it auto-opens one empty window - running
 # `do script` then would leave TWO windows (the empty one + ours). So we detect
 # whether Terminal was already running: if not, reuse the window the activation
 # just created (`do script ... in window 1`); if yes, open a new window.
@@ -70,14 +70,14 @@ tell application "Terminal"
         do script "$CMD" in window 1
     end if
     set custom title of front window to "Mirage"
-    set number of columns of front window to 110
-    set number of rows of front window to 34
+    set number of columns of front window to 92
+    set number of rows of front window to 28
 end tell
 APPLESCRIPT
 LAUNCHER
 chmod +x "$APP/Contents/MacOS/Mirage"
 
-# 3. Info.plist — makes it a real, double-clickable, Launchpad/Spotlight app.
+# 3. Info.plist - makes it a real, double-clickable, Launchpad/Spotlight app.
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -86,8 +86,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleName</key><string>Mirage</string>
     <key>CFBundleDisplayName</key><string>Mirage</string>
     <key>CFBundleIdentifier</key><string>coop.assembleurs.mirage</string>
-    <key>CFBundleVersion</key><string>1.0.0</string>
-    <key>CFBundleShortVersionString</key><string>1.0.0</string>
+    <key>CFBundleVersion</key><string>1.2.0</string>
+    <key>CFBundleShortVersionString</key><string>1.2.0</string>
     <key>CFBundleExecutable</key><string>Mirage</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleIconFile</key><string>Mirage.icns</string>
@@ -97,14 +97,19 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# 4. Icon: generate a simple .icns if none provided (a green up-arrow tile).
-ICON_SRC="$ROOT/assets/Mirage.png"
-if [[ -f "$ICON_SRC" ]] && command -v sips >/dev/null && command -v iconutil >/dev/null; then
+# 4. Icon. Prefer the committed assets/Mirage.icns (built from assets/icon.svg,
+#    a vector ">_" prompt). Only fall back to rasterizing assets/Mirage.png into
+#    an iconset if no .icns is present.
+ICNS_SRC="$ROOT/assets/Mirage.icns"
+PNG_SRC="$ROOT/assets/Mirage.png"
+if [[ -f "$ICNS_SRC" ]]; then
+  cp "$ICNS_SRC" "$APP/Contents/Resources/Mirage.icns"
+elif [[ -f "$PNG_SRC" ]] && command -v sips >/dev/null && command -v iconutil >/dev/null; then
   TMP_ICONSET="$(mktemp -d)/Mirage.iconset"
   mkdir -p "$TMP_ICONSET"
   for sz in 16 32 64 128 256 512; do
-    sips -z $sz $sz "$ICON_SRC" --out "$TMP_ICONSET/icon_${sz}x${sz}.png" >/dev/null
-    sips -z $((sz*2)) $((sz*2)) "$ICON_SRC" --out "$TMP_ICONSET/icon_${sz}x${sz}@2x.png" >/dev/null
+    sips -z $sz $sz "$PNG_SRC" --out "$TMP_ICONSET/icon_${sz}x${sz}.png" >/dev/null
+    sips -z $((sz*2)) $((sz*2)) "$PNG_SRC" --out "$TMP_ICONSET/icon_${sz}x${sz}@2x.png" >/dev/null
   done
   iconutil -c icns "$TMP_ICONSET" -o "$APP/Contents/Resources/Mirage.icns" 2>/dev/null || true
 fi

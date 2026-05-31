@@ -60,7 +60,7 @@ pub(crate) async fn process_commands(
             Cmd::ReinitClient => {
                 let cfg = (**CONFIG.load()).clone();
                 if let Some(n) = config::init_client(&cfg).await {
-                    // Aborts the previous renewer before spawning — no task leak.
+                    // Aborts the previous renewer before spawning - no task leak.
                     crate::spawn_key_renewer(n);
                 }
                 info!("client re-initialised");
@@ -183,7 +183,7 @@ async fn save_config_toml() {
 ///
 /// Uses the same manual JSON builder as [`crate::json_output`] and the same
 /// temp+rename write safety as [`crate::state`]. The clipboard gets the file
-/// path (not the full JSON — OSC-52 has terminal-dependent size limits).
+/// path (not the full JSON - OSC-52 has terminal-dependent size limits).
 async fn export_snapshot() {
     let started = match crate::STARTED.get() {
         Some(s) => *s,
@@ -214,7 +214,7 @@ async fn export_snapshot() {
     json.push('}');
 
     // Resolve the export directory: XDG state dir (same as state.json) on Unix,
-    // falling back to the torrent_dir. Never write to cwd — that breaks when
+    // falling back to the torrent_dir. Never write to cwd - that breaks when
     // launched from Mirage.app (cwd = $HOME, fine) but is surprising otherwise.
     #[cfg(unix)]
     let export_dir = xdg::BaseDirectories::with_prefix("Mirage")
@@ -263,7 +263,7 @@ async fn export_snapshot() {
         crate::ui::emit(
             crate::ui::EventKind::Error,
             "export",
-            "write failed — check logs",
+            "write failed - check logs",
         );
     }
 }

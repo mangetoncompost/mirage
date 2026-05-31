@@ -1,27 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <radialGradient id="bg" cx="50%" cy="50%" r="70%">
+    <radialGradient id="bg" cx="50%" cy="42%" r="72%">
       <stop offset="0%" stop-color="#0d1117"/>
       <stop offset="100%" stop-color="#060a0f"/>
     </radialGradient>
-    <filter id="glow">
-      <feGaussianBlur stdDeviation="8" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-    <filter id="glow-sm">
-      <feGaussianBlur stdDeviation="3" result="b"/>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
 
+  <!-- rounded tile -->
   <rect width="512" height="512" rx="112" ry="112" fill="url(#bg)"/>
+  <rect x="2" y="2" width="508" height="508" rx="110" ry="110"
+    fill="none" stroke="#4ec9ff" stroke-width="2" opacity="0.14"/>
 
-  <!-- border -->
-  <rect x="1.5" y="1.5" width="509" height="509" rx="111" ry="111"
-    fill="none" stroke="#4ec9ff" stroke-width="1.5" opacity="0.12"/>
-
-  <!-- >_ -->
-  <text x="256" y="300" font-family="'SF Mono', 'Fira Mono', 'Consolas', monospace"
-    font-size="192" font-weight="600" fill="#4ec9ff"
-    text-anchor="middle" filter="url(#glow)">&gt;_</text>
+  <!-- terminal prompt ">_" drawn as vector geometry (no font dependency, so it
+       rasterizes identically with sips/iconutil and in any SVG renderer) -->
+  <g filter="url(#glow)">
+    <polyline points="150,168 268,256 150,344" fill="none" stroke="#4ec9ff"
+      stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="286" y="322" width="148" height="40" rx="20" fill="#4ec9ff"/>
+  </g>
 </svg>

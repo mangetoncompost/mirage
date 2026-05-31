@@ -3,16 +3,16 @@
 //! any lock during the stdout write.
 //!
 //! DEADLOCK HAZARD (verified against the tree): the scheduler holds the inner
-//! per-torrent `Mutex` across a network announce — `m.lock().await` in
+//! per-torrent `Mutex` across a network announce - `m.lock().await` in
 //! scheduler.rs stays held through `tracker::announce(&mut t, ..).await`, which
 //! does HTTP/UDP I/O lasting seconds. `announce_started`, `announce_stopped`
 //! and the watcher do the same. The outer `TORRENTS.read()` is held alongside.
 //!
 //! Therefore the renderer:
-//!   1. takes `TORRENTS.read().await` — read-vs-read does not contend, but a
+//!   1. takes `TORRENTS.read().await` - read-vs-read does not contend, but a
 //!      queued watcher WRITE (add/remove) can briefly delay this read; that is
 //!      bounded because no announce holds `TORRENTS.read()` (see scheduler.rs);
-//!   2. uses `try_lock()` on each inner `Mutex`, NEVER `lock().await` — a torrent
+//!   2. uses `try_lock()` on each inner `Mutex`, NEVER `lock().await` - a torrent
 //!      mid-announce yields a "busy" placeholder row for that frame;
 //!   3. copies each torrent into a POD struct and drops every lock before any
 //!      stdout write.
@@ -33,16 +33,16 @@ pub struct TorrentView {
     pub leechers: u16,
     pub up_speed: u32, // bytes/s (next_upload_speed)
     pub uploaded: u64, // total bytes
-    pub length: u64,   // total torrent size (bytes) — ratio denominator + detail card
+    pub length: u64,   // total torrent size (bytes) - ratio denominator + detail card
     #[allow(dead_code)]
-    pub left: u64, // declared bytes left (0 when seeding) — future detail
+    pub left: u64, // declared bytes left (0 when seeding) - future detail
     #[allow(dead_code)]
-    pub interval: u64, // current announce interval (s) — for the Schedule ledger / detail card
+    pub interval: u64, // current announce interval (s) - for the Schedule ledger / detail card
     pub secs_to_announce: u64, // interval - elapsed, saturating
     pub error_count: u16,
     pub busy: bool,          // true => mid-announce, try_lock failed (placeholder row)
     pub downloading: bool,   // true => still in the simulated download phase
-    pub schedule_reason: u8, // why the current cadence (see torrent::ScheduleReason) — F3.3 ledger
+    pub schedule_reason: u8, // why the current cadence (see torrent::ScheduleReason) - F3.3 ledger
     pub dl_percent: u8,      // 0..=100 download progress
     #[allow(dead_code)]
     pub downloaded: u64, // declared downloaded bytes (display interpolation)
@@ -70,11 +70,11 @@ pub struct Frame {
     /// (no empty terminal rows below the board).
     pub feed_cap: usize,
     /// Terminal height in rows. Every view pads its body up to this (minus the
-    /// footer) so the box fills the whole window — no blank rows below it.
+    /// footer) so the box fills the whole window - no blank rows below it.
     pub term_h: usize,
     pub spinner: usize,
     /// `(seconds_since_started, cumulative_uploaded_bytes)` samples, oldest
-    /// first — copied from the lock-light history ring by `render_once`. Feeds
+    /// first - copied from the lock-light history ring by `render_once`. Feeds
     /// the cumulative-upload graph. Empty until the first tick records a sample.
     pub up_history: Vec<(i64, u64)>,
     /// Stable per-session peak of the fastest single-torrent upload speed
@@ -86,7 +86,7 @@ pub struct Frame {
     /// Label for the celebration footer line (e.g. "ratio 2.0× !").
     pub celebrate_label: String,
     /// The set of multi-selected torrent hashes (F2.1). POD copy snapshotted
-    /// once per tick; `build_frame` reads only this copy — never MARKED directly.
+    /// once per tick; `build_frame` reads only this copy - never MARKED directly.
     pub marked: HashSet<[u8; 20]>,
 }
 
@@ -99,7 +99,7 @@ pub async fn snapshot_torrents() -> Vec<TorrentView> {
             Ok(t) => {
                 let elapsed = t.last_announce.elapsed().as_secs();
                 // Display-only projection of download progress between sparse
-                // ticks (does NOT mutate dl_state — advance happens only in the
+                // ticks (does NOT mutate dl_state - advance happens only in the
                 // scheduler). u128 percent math is safe for huge u64 lengths.
                 let projected = if t.is_seeding() {
                     t.length
@@ -112,19 +112,32 @@ pub async fn snapshot_torrents() -> Vec<TorrentView> {
                 } else {
                     (projected as u128 * 100 / t.length as u128) as u8
                 };
+                // Display-only projection of uploaded bytes between the sparse
+                // announces (which are the ONLY place t.uploaded is mutated). We
+                // add the integral of the speed curve over the window since the
+                // last announce, the same closed form the next announce will
+                // declare, so the displayed total climbs live instead of sitting
+                // flat for ~30 min. The tracker still receives the value computed
+                // at announce time; this never mutates t.uploaded.
+                let projected_uploaded = {
+                    let t1 = t.origin.elapsed().as_secs_f64();
+                    let t0 = (t1 - t.last_announce.elapsed().as_secs_f64()).max(0.0);
+                    let gained = t.integrate(t0, t1).round().max(0.0) as u64;
+                    t.uploaded.saturating_add(gained)
+                };
                 rows.push(TorrentView {
                     name: t.name.clone(),
                     info_hash: t.info_hash,
                     seeders: t.seeders,
                     leechers: t.leechers,
                     // Instantaneous speed off the same curve that backs the
-                    // declared integral — 4 sins, synchronous, no .await. It is 0
+                    // declared integral - 4 sins, synchronous, no .await. It is 0
                     // while downloading (can_upload() is false), which is correct.
                     up_speed: t
                         .speed_at(t.origin.elapsed().as_secs_f64())
                         .round()
                         .min(u32::MAX as f64) as u32,
-                    uploaded: t.uploaded,
+                    uploaded: projected_uploaded,
                     length: t.length,
                     left: t.declared_left(),
                     interval: t.interval,
@@ -165,7 +178,7 @@ pub async fn snapshot_torrents() -> Vec<TorrentView> {
 pub async fn snapshot_client() -> Option<ClientView> {
     // Use try_read so a queued CLIENT writer (key-renewer timer or `k` re-init)
     // does not block the render loop. On contention we simply show no client info
-    // for this frame — same "busy placeholder" discipline as snapshot_torrents.
+    // for this frame - same "busy placeholder" discipline as snapshot_torrents.
     crate::CLIENT.try_read().ok()?.as_ref().map(|c| ClientView {
         name: c.name.clone(),
         peer_id: c.peer_id.clone(),

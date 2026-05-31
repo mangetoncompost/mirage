@@ -94,6 +94,9 @@ pub fn set_view(i: usize) {
     SEL.store(0, Ordering::Relaxed);
     // Close the detail overlay on tab switch (palette/help the key handler closes).
     super::overlay::close_detail();
+    // Cancel a pending remove confirmation so leaving the tab never strands it
+    // (and never lets a y press on a later tab fire a remove out of context).
+    super::overlay::close_confirm_remove();
     // Clear multi-selection so a stale set never targets dead torrents after a tab switch.
     if let Ok(mut g) = MARKED.lock() {
         g.clear();

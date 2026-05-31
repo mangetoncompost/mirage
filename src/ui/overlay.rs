@@ -2,19 +2,20 @@
 //!
 //! An overlay replaces the per-view body for one frame. The active overlay is
 //! resolved in `render_once` (from the process-global atomics below) and passed
-//! into `build_frame` as a plain enum value — `build_frame` stays pure and only
+//! into `build_frame` as a plain enum value - `build_frame` stays pure and only
 //! *renders* the resolved state, never reads atomics itself.
 //!
 //! Currently defined overlays:
-//! - `None`    — normal view body
-//! - `Help`    — the `?` help card (migrated from the old `help_open()` bool)
-//! - `Palette` — the fuzzy command palette (F3.1; INFRA-C wires its keys)
-//! - `Detail`  — per-torrent info + wire sub-view (F3.2)
+//! - `None`          - normal view body
+//! - `Help`          - the `?` help card (migrated from the old `help_open()` bool)
+//! - `Palette`       - the command palette (F3.1; INFRA-C wires its keys)
+//! - `Detail`        - per-torrent info + wire sub-view (F3.2)
+//! - `ConfirmRemove` - y/Esc guard before a destructive torrent removal
 
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
 /// Which overlay (if any) is currently open. Resolved in `render_once`, passed
-/// to `build_frame` as a `Overlay` value — never read inside `build_frame`.
+/// to `build_frame` as a `Overlay` value - never read inside `build_frame`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Overlay {
     None,
@@ -23,6 +24,9 @@ pub enum Overlay {
     /// Detail card for a specific torrent (identified by a compact 20-byte
     /// info-hash stored separately in `DETAIL_HASH`).
     Detail,
+    /// Confirmation prompt before a destructive remove. The target hashes are
+    /// held in `CONFIRM_TARGETS`; `y`/Enter commits, `Esc`/`n` cancels.
+    ConfirmRemove,
 }
 
 // --- process-global overlay state (one atomic per overlay type) ---------------
@@ -37,14 +41,23 @@ static DETAIL: AtomicBool = AtomicBool::new(false);
 pub static DETAIL_SUB: AtomicU8 = AtomicU8::new(0);
 
 // DETAIL_HASH: the info-hash of the torrent whose detail card is open.
-// A Mutex<Option<[u8;20]>> — same pattern as ROWS in view.rs.
+// A Mutex<Option<[u8;20]>> - same pattern as ROWS in view.rs.
 use std::sync::Mutex;
 pub static DETAIL_HASH: Mutex<Option<[u8; 20]>> = Mutex::new(None);
 
-/// Resolve the active overlay for this frame. Priority: Help > Palette > Detail.
-/// Called once per tick from `render_once`; result is passed into `build_frame`.
+/// ConfirmRemove overlay open?
+static CONFIRM_REMOVE: AtomicBool = AtomicBool::new(false);
+/// The hashes a pending remove will act on, captured at the moment `x` was
+/// pressed so a list change between prompt and confirm never retargets it.
+static CONFIRM_TARGETS: Mutex<Vec<[u8; 20]>> = Mutex::new(Vec::new());
+
+/// Resolve the active overlay for this frame. Priority: ConfirmRemove > Help >
+/// Palette > Detail. The confirmation wins so a destructive prompt is never
+/// hidden behind another overlay. Called once per tick from `render_once`.
 pub fn active() -> Overlay {
-    if HELP.load(Ordering::Relaxed) {
+    if CONFIRM_REMOVE.load(Ordering::Relaxed) {
+        Overlay::ConfirmRemove
+    } else if HELP.load(Ordering::Relaxed) {
         Overlay::Help
     } else if PALETTE.load(Ordering::Relaxed) {
         Overlay::Palette
@@ -144,6 +157,40 @@ pub fn cycle_detail_sub() {
     DETAIL_SUB.store(if cur == 0 { 1 } else { 0 }, Ordering::Relaxed);
 }
 
+// --- ConfirmRemove ------------------------------------------------------------
+
+pub fn confirm_remove_open() -> bool {
+    CONFIRM_REMOVE.load(Ordering::Relaxed)
+}
+
+/// Open the remove-confirmation prompt for `targets`. No-op on an empty set so
+/// `x` with nothing to remove never raises an empty prompt.
+pub fn open_confirm_remove(targets: Vec<[u8; 20]>) {
+    if targets.is_empty() {
+        return;
+    }
+    if let Ok(mut g) = CONFIRM_TARGETS.lock() {
+        *g = targets;
+    }
+    CONFIRM_REMOVE.store(true, Ordering::Relaxed);
+}
+
+/// Close the prompt and clear the captured targets (cancel path).
+pub fn close_confirm_remove() {
+    CONFIRM_REMOVE.store(false, Ordering::Relaxed);
+    if let Ok(mut g) = CONFIRM_TARGETS.lock() {
+        g.clear();
+    }
+}
+
+/// The hashes the pending remove will act on (POD copy for the prompt / commit).
+pub fn confirm_targets() -> Vec<[u8; 20]> {
+    CONFIRM_TARGETS
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default()
+}
+
 // --- Milestone celebration (F1.3) --------------------------------------------
 // Ratio milestones (uploaded / total_length, stored as units of 0.5, so "2.0"
 // is stored as 4): 1.0, 1.5, 2.0, 3.0, 5.0, 10.0.
@@ -193,4 +240,34 @@ pub fn celebration_label() -> String {
         .lock()
         .map(|g| g.clone())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn confirm_remove_opens_holds_targets_and_closes() {
+        let h1 = [1u8; 20];
+        let h2 = [2u8; 20];
+        // Empty targets must not open a prompt.
+        close_confirm_remove();
+        open_confirm_remove(vec![]);
+        assert!(!confirm_remove_open());
+
+        // Opening with targets captures them and raises the prompt with top
+        // priority over the other overlays.
+        open_confirm_remove(vec![h1, h2]);
+        assert!(confirm_remove_open());
+        assert_eq!(confirm_targets(), vec![h1, h2]);
+        HELP.store(true, Ordering::Relaxed);
+        assert_eq!(active(), Overlay::ConfirmRemove);
+        HELP.store(false, Ordering::Relaxed);
+
+        // Cancel clears both the flag and the captured set.
+        close_confirm_remove();
+        assert!(!confirm_remove_open());
+        assert!(confirm_targets().is_empty());
+        assert_eq!(active(), Overlay::None);
+    }
 }

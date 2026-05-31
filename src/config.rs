@@ -123,12 +123,12 @@ impl Config {
                     } else {
                         error!("use_pid_file is not a boolean");
                     }
-                    // Note: the redundant bool::from_str fallback has been removed —
+                    // Note: the redundant bool::from_str fallback has been removed -
                     // as_bool() is authoritative for TOML boolean values.
                 }
 
                 // Rate fields: validate range [0, u32::MAX] and fall through on
-                // bad input (don't return early — later valid fields would be lost).
+                // bad input (don't return early - later valid fields would be lost).
                 let parse_rate = |label: &str, v: i64| -> Option<u32> {
                     if (0..=(u32::MAX as i64)).contains(&v) {
                         Some(v as u32)

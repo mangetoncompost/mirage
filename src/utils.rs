@@ -55,7 +55,7 @@ pub fn percent_encoding(input: &[u8]) -> String {
 }
 
 /// Base64-encode `input` (RFC 4648 standard alphabet, with padding). Used for
-/// OSC-52 clipboard export (F2.3). No new crate — the alphabet is tiny and the
+/// OSC-52 clipboard export (F2.3). No new crate - the alphabet is tiny and the
 /// operation is one-shot, so a local 30-line impl keeps the zero-new-crate invariant.
 pub fn base64_encode(input: &[u8]) -> String {
     const ALPHA: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

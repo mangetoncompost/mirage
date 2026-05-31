@@ -44,7 +44,42 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                 let active = view::active_view();
                 use crate::ui::overlay;
 
-                // INFRA-C: palette capture mode — when the palette is open,
+                // Confirm-remove capture mode - when the destructive-remove
+                // prompt is open it owns every key until the user commits or
+                // cancels, so no other binding can fire underneath it. The
+                // targets were captured when `x` was pressed.
+                if overlay::confirm_remove_open() {
+                    match (code, modifiers) {
+                        (KeyCode::Char('y' | 'Y'), _) | (KeyCode::Enter, _) => {
+                            let targets = overlay::confirm_targets();
+                            let n = targets.len();
+                            for h in targets {
+                                control::send(Cmd::Remove(h));
+                            }
+                            view::clear_marks();
+                            overlay::close_confirm_remove();
+                            if n > 0 {
+                                crate::ui::emit(
+                                    crate::ui::EventKind::Removed,
+                                    "-",
+                                    if n == 1 {
+                                        "removing 1 torrent…".to_string()
+                                    } else {
+                                        format!("removing {n} torrents…")
+                                    },
+                                );
+                            }
+                        }
+                        (KeyCode::Esc, _) | (KeyCode::Char('n' | 'N'), _) => {
+                            overlay::close_confirm_remove();
+                        }
+                        _ => {}
+                    }
+                    crate::ui::request_redraw();
+                    continue;
+                }
+
+                // INFRA-C: palette capture mode - when the palette is open,
                 // route printable chars / Backspace / arrows / Enter / Esc
                 // to the palette buffer BEFORE the normal keymap.
                 if overlay::palette_open() {
@@ -73,6 +108,7 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                         }
                         _ => {}
                     }
+                    crate::ui::request_redraw();
                     continue;
                 }
 
@@ -86,6 +122,10 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                     }
                     // Arrows: on the list views walk the selection; elsewhere keep
                     // the long-standing global speed bump (muscle memory).
+                    // Vim aliases: `k`/`j` mirror Up/Down but ONLY where Up/Down
+                    // do selection (list views + Speeds), so `k` never collides
+                    // with the Client-tab re-init binding and `j`/`k` never nudge
+                    // the global multiplier off-list (that stays arrow-only).
                     (KeyCode::Up, _) => {
                         if matches!(active, View::Dashboard | View::Torrents | View::Trackers) {
                             view::bump_sel(-1, view::row_count());
@@ -94,6 +134,19 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                         } else {
                             crate::torrent::bump_multiplier(1);
                         }
+                    }
+                    (KeyCode::Char('k'), _)
+                        if matches!(
+                            active,
+                            View::Dashboard | View::Torrents | View::Trackers | View::Speeds
+                        ) =>
+                    {
+                        let max = if active == View::Speeds {
+                            6
+                        } else {
+                            view::row_count()
+                        };
+                        view::bump_sel(-1, max);
                     }
                     (KeyCode::Down, _) => {
                         if matches!(active, View::Dashboard | View::Torrents | View::Trackers) {
@@ -104,9 +157,22 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                             crate::torrent::bump_multiplier(-1);
                         }
                     }
-                    // Left/Right move between tabs (wraps around).
-                    (KeyCode::Right, _) => view::cycle_view(1),
-                    (KeyCode::Left, _) => view::cycle_view(-1),
+                    (KeyCode::Char('j'), _)
+                        if matches!(
+                            active,
+                            View::Dashboard | View::Torrents | View::Trackers | View::Speeds
+                        ) =>
+                    {
+                        let max = if active == View::Speeds {
+                            6
+                        } else {
+                            view::row_count()
+                        };
+                        view::bump_sel(1, max);
+                    }
+                    // Left/Right (and vim h/l) move between tabs (wraps around).
+                    (KeyCode::Right, _) | (KeyCode::Char('l'), _) => view::cycle_view(1),
+                    (KeyCode::Left, _) | (KeyCode::Char('h'), _) => view::cycle_view(-1),
                     // +/- edit the selected setting on the Speeds view, else
                     // nudge the global upload multiplier.
                     (KeyCode::Char('+' | '='), _) => speed_edit(active, 1),
@@ -162,37 +228,27 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                         if targets.is_empty() && view::row_count() > 0 {
                             crate::ui::emit(
                                 crate::ui::EventKind::Error,
-                                "—",
-                                "torrent busy (announcing) — try again",
+                                "-",
+                                "torrent busy (announcing) - try again",
                             );
                         }
                         for h in targets {
                             control::send(Cmd::ForceAnnounce(h));
                         }
                     }
+                    // Remove is destructive and irreversible, so `x` only opens a
+                    // confirmation prompt; the actual Cmd::Remove fires from the
+                    // confirm-capture block above once the user presses y/Enter.
                     (KeyCode::Char('x'), _) if is_list_view(active) => {
                         let targets = view::marked_or_selected();
                         if targets.is_empty() && view::row_count() > 0 {
                             crate::ui::emit(
                                 crate::ui::EventKind::Error,
-                                "—",
-                                "torrent busy (announcing) — try again",
+                                "-",
+                                "torrent busy (announcing) - try again",
                             );
-                        } else if !targets.is_empty() {
-                            let n = targets.len();
-                            for h in targets {
-                                control::send(Cmd::Remove(h));
-                            }
-                            view::clear_marks();
-                            crate::ui::emit(
-                                crate::ui::EventKind::Removed,
-                                "—",
-                                if n == 1 {
-                                    "removing 1 torrent…".to_string()
-                                } else {
-                                    format!("removing {n} torrents…")
-                                },
-                            );
+                        } else {
+                            overlay::open_confirm_remove(targets);
                         }
                     }
                     (KeyCode::Char('k'), _) if active == View::Client => {
@@ -220,6 +276,10 @@ pub fn spawn(running: Arc<AtomicBool>, notify: tokio::sync::mpsc::UnboundedSende
                     }
                     _ => {}
                 }
+                // Any handled key may have changed view/selection/overlay/config,
+                // so wake the render loop for an immediate repaint instead of
+                // waiting up to one ~400ms tick.
+                crate::ui::request_redraw();
             }
         });
 }

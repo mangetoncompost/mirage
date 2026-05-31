@@ -1,6 +1,6 @@
 //! Persistence of each torrent's simulated download phase, keyed by info_hash,
 //! so a restart resumes (completed torrents seed immediately, partially
-//! downloaded ones continue from where they left off — never re-downloading
+//! downloaded ones continue from where they left off - never re-downloading
 //! from scratch, which would itself be a tell).
 //!
 //! Hand-rolled JSON (the project already hand-rolls bencode + json_output, and
@@ -8,8 +8,8 @@
 //! missing/corrupt file, removed/new torrents, and file-size changes.
 //!
 //! **Schema versions:**
-//! - v1 — `{version:1, torrents:[{info_hash, length, downloaded, seeding}]}`
-//! - v2 — adds optional `upload_target` per torrent (F2.2 ratio cap)
+//! - v1 - `{version:1, torrents:[{info_hash, length, downloaded, seeding}]}`
+//! - v2 - adds optional `upload_target` per torrent (F2.2 ratio cap)
 //!
 //! The parser accepts both versions: v1 files default `upload_target` to None,
 //! so upgrading from v1 → v2 is transparent. v1 files are NOT re-written as v2
@@ -115,7 +115,7 @@ pub fn apply(t: &mut Torrent, dict: &HashMap<String, Entry>) {
     };
     if e.length != t.length {
         // File changed under this info_hash: don't trust a stale `downloaded`
-        // against a different size — restart the download.
+        // against a different size - restart the download.
         t.dl_state = if t.length == 0 {
             DownloadState::Seeding
         } else {

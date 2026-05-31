@@ -66,7 +66,7 @@ pub async fn watch_directory(directory: PathBuf) {
                             EventKind::Create(_) => Some(FsEvent::Added(path)),
                             EventKind::Remove(_) => Some(FsEvent::Removed(path)),
                             // Atomic rename (rsync / transmission temp-file+rename) fires
-                            // Modify(Name(To)) on Linux/macOS — treat as an add.
+                            // Modify(Name(To)) on Linux/macOS - treat as an add.
                             EventKind::Modify(notify::event::ModifyKind::Name(
                                 notify::event::RenameMode::To,
                             )) => Some(FsEvent::Added(path)),
@@ -247,7 +247,7 @@ async fn handle_file_removed(path: PathBuf) {
         }
 
         // Remove from list. Use try_lock to read the hash; if try_lock fails the
-        // torrent is still mid-announce — we already sent STOPPED above, so it
+        // torrent is still mid-announce - we already sent STOPPED above, so it
         // is safe to drop it now (retain returns false → removes it).
         {
             let mut list = TORRENTS.write().await;

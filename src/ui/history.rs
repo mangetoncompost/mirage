@@ -3,7 +3,7 @@
 //!
 //! Same discipline as [`super::view::ROWS`]: a `std::sync::Mutex` touched once
 //! per render tick from `render_once` (never from the key thread, never from
-//! `build_frame`). `build_frame` stays pure — it only ever sees a POD copy of
+//! `build_frame`). `build_frame` stays pure - it only ever sees a POD copy of
 //! the samples that `render_once` already pulled into the `Frame`.
 //!
 //! Sampling is keyed on whole seconds since `STARTED` (a `OnceCell`, so the
@@ -54,7 +54,7 @@ pub fn push_sample(secs: i64, total_up: u64, row_peak: u64) {
     q.push_back((secs, total_up));
 
     // When full, halve the resolution in place: keep every other sample. The
-    // series still spans the whole session, just coarser — and because each
+    // series still spans the whole session, just coarser - and because each
     // sample carries its own `secs`, the graph's X axis stays correct regardless
     // of how many downsampling passes have happened.
     if q.len() > CAP {

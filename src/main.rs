@@ -36,7 +36,7 @@ static CONFIG: Lazy<ArcSwap<Config>> = Lazy::new(|| ArcSwap::from_pointee(Config
 static CLIENT: RwLock<Option<Client>> = RwLock::const_new(None);
 /// Torrents are `Arc<Mutex<…>>` so the scheduler can clone the handles out under
 /// a short read lock and then announce (network I/O) holding ONLY each torrent's
-/// own mutex — never the outer `TORRENTS` read lock across an await. That keeps a
+/// own mutex - never the outer `TORRENTS` read lock across an await. That keeps a
 /// `TORRENTS.write()` (add/remove) from freezing the announce loop + UI.
 static TORRENTS: RwLock<Vec<Arc<Mutex<Torrent>>>> = RwLock::const_new(Vec::new());
 
@@ -118,7 +118,7 @@ async fn main() {
     };
     // Live dashboard on an interactive TTY; classic tracing logs otherwise.
     // In TUI mode we deliberately do NOT init the fmt subscriber so the tracing
-    // macros become no-ops and cannot corrupt the alternate screen — the event
+    // macros become no-ops and cannot corrupt the alternate screen - the event
     // ring carries the signal in-UI instead.
     let tui = ui::should_use_tui();
     let _term_guard = if tui {
@@ -213,7 +213,7 @@ async fn main() {
     tokio::spawn(async move {
         // Graceful exit on Ctrl+C (SIGINT, or the q / Ctrl+C-as-key the dashboard
         // reads under raw mode), AND on SIGTERM (`kill`) / SIGHUP (the Terminal
-        // window is closed) — so closing the Mirage.app window still restores
+        // window is closed) - so closing the Mirage.app window still restores
         // the terminal, announces STOPPED and saves state.
         #[cfg(unix)]
         {

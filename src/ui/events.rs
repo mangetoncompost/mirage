@@ -33,8 +33,8 @@ impl EventKind {
     /// A short glyph used in the feed pane. UTF-8 variant.
     ///
     /// Single-cell BMP symbols (not emoji): emoji are absent from most monospace
-    /// fonts — incl. the bundled JetBrains Mono used by the embedded-terminal
-    /// window — so they'd render as tofu there. These render identically in a
+    /// fonts - incl. the bundled JetBrains Mono used by the embedded-terminal
+    /// window - so they'd render as tofu there. These render identically in a
     /// plain terminal AND the window, and being 1 cell wide they also keep the
     /// feed columns aligned.
     pub fn glyph(self) -> &'static str {
