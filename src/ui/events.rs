@@ -92,11 +92,16 @@ pub fn emit(kind: EventKind, torrent: &str, msg: impl Into<Box<str>>) {
     if q.len() == CAP {
         q.pop_front();
     }
+    // Strip control characters defensively: torrent names and some messages can
+    // carry untrusted bytes, and the feed is painted into the alternate screen
+    // verbatim. A CR/LF/ESC here would corrupt the layout or run an escape.
+    let strip = |s: &str| -> Box<str> { s.chars().filter(|c| !c.is_control()).collect() };
+    let msg: Box<str> = msg.into();
     q.push_back(UiEvent {
         at: chrono::Utc::now(),
         kind,
-        torrent: torrent.into(),
-        msg: msg.into(),
+        torrent: strip(torrent),
+        msg: strip(&msg),
     });
 }
 

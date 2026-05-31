@@ -42,6 +42,14 @@ pub fn bump_multiplier(delta: isize) -> f64 {
     SPEED_STEPS[next]
 }
 
+/// Strip control characters from an untrusted torrent name. Removes CR, LF,
+/// ESC, and every other `char::is_control()` byte so a hostile `.torrent` name
+/// cannot inject terminal escape sequences or break the dashboard layout. Used
+/// at the parse trust boundary; printable Unicode (including non-ASCII) is kept.
+pub fn sanitize_name(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).collect()
+}
+
 /// Errors that can occur when parsing a Torrent struct from Bencode.
 #[derive(Debug)]
 pub enum TorrentError {
@@ -628,9 +636,16 @@ impl Torrent {
             .get(b"name".as_ref())
             .ok_or(TorrentError::MissingField("info.name"))?;
         let name = match name_bytes {
-            BencodeValue::ByteString(b) => std::str::from_utf8(b)
-                .map_err(|_| TorrentError::Utf8ConversionError("info.name"))?
-                .to_string(),
+            BencodeValue::ByteString(b) => {
+                let raw = std::str::from_utf8(b)
+                    .map_err(|_| TorrentError::Utf8ConversionError("info.name"))?;
+                // A .torrent comes from an untrusted tracker. Strip control
+                // characters (CR/LF/ESC/etc.) at this trust boundary so a hostile
+                // name can never reach the terminal and reset the cursor, shift
+                // the layout, or run an escape sequence mid-paint. This single
+                // point covers the table, detail card, feed, JSON, and clipboard.
+                sanitize_name(raw)
+            }
             _ => return Err(TorrentError::InvalidFieldType("info.name")),
         };
 
@@ -727,6 +742,17 @@ impl Torrent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitize_name_strips_control_chars_keeps_unicode() {
+        assert_eq!(sanitize_name("evil\rX"), "evilX");
+        assert_eq!(sanitize_name("\x1b[2Jclear"), "[2Jclear");
+        assert_eq!(sanitize_name("a\nb\tc"), "abc");
+        // Printable Unicode (accents, CJK) is preserved.
+        assert_eq!(sanitize_name("ubuntu-é-日本"), "ubuntu-é-日本");
+        // No control char => unchanged.
+        assert_eq!(sanitize_name("linuxmint-22.1"), "linuxmint-22.1");
+    }
 
     /// Minimal Downloading torrent for download-phase tests (CONFIG-independent).
     fn dl_torrent(length: u64, rate: u64) -> Torrent {
