@@ -13,7 +13,7 @@ jobs:
     name: Linux x86_64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set version from tag
         run: bash scripts/set_version.sh "${{ github.ref_name }}"
@@ -36,7 +36,7 @@ jobs:
         run: cp target/x86_64-unknown-linux-musl/release/mirage mirage-linux-x86_64
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: mirage-linux-x86_64
           path: mirage-linux-x86_64
@@ -52,7 +52,7 @@ jobs:
           - target: x86_64-apple-darwin
             suffix: macos-x86_64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set version from tag
         run: bash scripts/set_version.sh "${{ github.ref_name }}"
@@ -72,7 +72,7 @@ jobs:
         run: cp target/${{ matrix.target }}/release/mirage mirage-${{ matrix.suffix }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: mirage-${{ matrix.suffix }}
           path: mirage-${{ matrix.suffix }}
@@ -81,7 +81,7 @@ jobs:
     name: Windows x86_64
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set version from tag
         shell: bash
@@ -100,7 +100,7 @@ jobs:
         run: cp target/release/mirage.exe mirage-windows-x86_64.exe
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: mirage-windows-x86_64.exe
           path: mirage-windows-x86_64.exe
@@ -109,7 +109,7 @@ jobs:
     name: macOS .app bundle
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set version from tag
         run: bash scripts/set_version.sh "${{ github.ref_name }}"
@@ -137,7 +137,7 @@ jobs:
         run: zip -r Mirage.app.zip Mirage.app
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Mirage.app.zip
           path: Mirage.app.zip
@@ -149,15 +149,15 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           merge-multiple: true
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
           draft: false
@@ -175,7 +175,7 @@ jobs:
     needs: [build-linux, build-macos, build-windows, build-macos-app]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set version from tag
         run: bash scripts/set_version.sh "${{ github.ref_name }}"

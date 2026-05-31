@@ -13,7 +13,11 @@ jobs:
     name: cargo audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      # rustsec/audit-check has no Node 24 tag released yet (the node24 runtime
+      # lives on an untagged main). v2 still declares node20; GitHub force-runs
+      # it on Node 24 after 2026-06-16 and the action code is already compatible.
+      # Re-pin to a node24 tag once one is published.
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
