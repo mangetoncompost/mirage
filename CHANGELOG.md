@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.1 - 2026-05-31
+
+### Fixed
+
+- The help overlay (`?`) is laid out in two columns so the full keymap fits the macOS app window (92x28) instead of clipping the tabs and session bindings; it falls back to one column on a narrow terminal
+
 ## v1.3.0 - 2026-05-31
 
 ### Added
